@@ -187,7 +187,7 @@ async fn handle_request(
 
     let mtime =
         httpdate::parse_http_date(headers.get("last-modified").unwrap().to_str().unwrap()).unwrap();
-    let body = Vec::from(res.text().await.unwrap());
+    let body = res.bytes().await.unwrap();
 
     fs::create_dir_all(path.parent().unwrap()).expect("Failed to create parent dir");
     fs::write(path.clone(), &body).expect("Failed to write file");
