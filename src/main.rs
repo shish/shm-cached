@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 use std::sync::Arc;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, UNIX_EPOCH};
 use structopt::StructOpt;
 use tokio::sync::RwLock;
 use utime;
@@ -120,6 +120,9 @@ async fn handle_request(
         .join(&hash)
         .join("human.jpg");
 
+    // ================================================================
+    // If we don't own this image, redirect to the owner
+    // ================================================================
     let owner = owners.get(0).unwrap().clone();
     let backup = owners.get(1).unwrap().clone();
     if owner != me && backup != me {
@@ -139,8 +142,9 @@ async fn handle_request(
         return Ok(Box::new(warp::redirect(target)));
     }
 
-    let mtime: SystemTime;
-    let body: Vec<u8>;
+    // ================================================================
+    // If we own this image and it's on disk, serve it
+    // ================================================================
     if path.exists() {
         {
             let mut stats = locked_stats.write().await;
@@ -148,30 +152,44 @@ async fn handle_request(
         }
 
         let mtime_secs = utime::get_file_times(path.clone()).unwrap().1;
-        mtime = UNIX_EPOCH + Duration::from_secs(mtime_secs as u64);
-        body = fs::read(path).unwrap();
-    } else {
-        {
-            let mut stats = locked_stats.write().await;
-            stats.misses += 1;
-        }
+        let mtime = UNIX_EPOCH + Duration::from_secs(mtime_secs as u64);
+        let body = fs::read(path).unwrap();
 
-        // headers={"User-Agent": "shm-cached"}
-        let res = reqwest::get(url.to_str().unwrap()).await.unwrap();
-        let headers = res.headers();
-        if res.status() != reqwest::StatusCode::OK {
-            panic!("Bad response: {}", res.status());
-        }
-
-        mtime = httpdate::parse_http_date(headers.get("last-modified").unwrap().to_str().unwrap())
-            .unwrap();
-        body = Vec::from(res.text().await.unwrap());
-
-        fs::create_dir_all(path.parent().unwrap()).expect("Failed to create parent dir");
-        fs::write(path.clone(), &body).expect("Failed to write file");
-        let mtime_secs = mtime.duration_since(UNIX_EPOCH).unwrap().as_secs() as i64;
-        utime::set_file_times(path.clone(), mtime_secs, mtime_secs).expect("Failed to set mtime");
+        return Ok(Box::new(
+            Response::builder()
+                .status(200)
+                .header("Content-Type", "image/jpeg")
+                .header("Last-Modified", httpdate::fmt_http_date(mtime))
+                .header("Cache-Control", "public, max-age=31556926")
+                .body(body),
+        ));
     }
+
+    // ================================================================
+    // If we own this image and it's missing, fetch it
+    // ================================================================
+    let res = reqwest::get(url.to_str().unwrap()).await.unwrap();
+    let headers = res.headers();
+    if res.status() != reqwest::StatusCode::OK {
+        let mut stats = locked_stats.write().await;
+        stats.missing += 1;
+        return Err(warp::reject::not_found());
+    }
+
+    {
+        let mut stats = locked_stats.write().await;
+        stats.misses += 1;
+    }
+
+    let mtime =
+        httpdate::parse_http_date(headers.get("last-modified").unwrap().to_str().unwrap()).unwrap();
+    let body = Vec::from(res.text().await.unwrap());
+
+    fs::create_dir_all(path.parent().unwrap()).expect("Failed to create parent dir");
+    fs::write(path.clone(), &body).expect("Failed to write file");
+    let mtime_secs = mtime.duration_since(UNIX_EPOCH).unwrap().as_secs() as i64;
+    utime::set_file_times(path.clone(), mtime_secs, mtime_secs).expect("Failed to set mtime");
+
     return Ok(Box::new(
         Response::builder()
             .status(200)

@@ -1,9 +1,9 @@
 use flexihash::Flexihash;
 use futures::channel::mpsc;
 use futures::FutureExt;
-use futures::{stream, StreamExt, future};
-use tokio_postgres::{NoTls, AsyncMessage};
+use futures::{future, stream, StreamExt};
 use std::path::Path;
+use tokio_postgres::{AsyncMessage, NoTls};
 
 use crate::types::GlobalSilos;
 
@@ -38,10 +38,10 @@ pub async fn spawn_db_listener(dsn: String, cache: String, locked_silos: GlobalS
                 let notification = future::ready(Some(future_notification)).await.unwrap();
                 if notification.channel() == "config" {
                     populate_silo(&locked_silos, &client, "_thumbs", "image_tlink").await;
-                    populate_silo(&locked_silos, &client, "_images", "image_ilink").await;        
+                    populate_silo(&locked_silos, &client, "_images", "image_ilink").await;
                 }
                 if notification.channel() == "shm_image_bans" {
-                    clean(&cache, &locked_silos, notification.payload()).await;    
+                    clean(&cache, &locked_silos, notification.payload()).await;
                 }
             }
         }
