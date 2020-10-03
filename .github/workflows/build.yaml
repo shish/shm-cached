@@ -28,7 +28,6 @@ jobs:
     runs-on: ubuntu-latest
     needs: build
     if: github.event_name == 'push'
-    cache: ${{ github.event_name != 'schedule' }}
     steps:
     - name: Publish
       uses: actions/upload-artifact@v2
