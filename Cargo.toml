@@ -1,0 +1,18 @@
+[package]
+name = "shm-cached"
+version = "0.1.0"
+authors = ["Shish <shish@shishnet.org>"]
+edition = "2018"
+
+[dependencies]
+# tokio = { version = "0.2", features = ["macros"] }
+flexihash = "*"
+tokio = { version = "0.2", features = ["full"] }
+tokio-postgres = "*"
+warp = "0.2"
+pretty_env_logger = "*"
+structopt = "*"
+utime = "*"
+httpdate = "*"
+reqwest = "*"
+futures = "*"
