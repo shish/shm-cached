@@ -187,9 +187,8 @@ async fn handle_request(
         stats.requests += 1;
     }
 
-    let owner = match silos.get(&silo) {
-        // Some(s) => s.lookup_list(&hash, 2),
-        Some(s) => s.lookup(&hash),
+    let owners = match silos.get(&silo) {
+        Some(s) => s.lookup_list(&hash, 2),
         None => {
             let mut stats = locked_stats.write().await;
             stats.invalid += 1;
@@ -207,7 +206,9 @@ async fn handle_request(
         .join(&hash)
         .join("human.jpg");
 
-    if owner != me {
+    let owner = owners.get(0).unwrap().clone();
+    let backup = owners.get(1).unwrap().clone();
+    if owner != me && backup != me {
         {
             let mut stats = locked_stats.write().await;
             stats.redirect += 1;
