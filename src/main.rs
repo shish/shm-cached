@@ -4,16 +4,16 @@ use std::fs;
 use std::path::Path;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use structopt::StructOpt;
 use tokio::sync::RwLock;
 use utime;
 use warp::{http::Response, http::Uri, Filter};
-use structopt::StructOpt;
 
+mod db;
 mod types;
-mod silos;
 
+use crate::db::spawn_db_listener;
 use crate::types::*;
-use crate::silos::spawn_balancer;
 
 #[tokio::main]
 async fn main() {
@@ -24,10 +24,10 @@ async fn main() {
     let silos = HashMap::new();
 
     let locked_stats = GlobalStats::default();
-    let locked_args = Arc::new(RwLock::new(args));
+    let locked_args = Arc::new(RwLock::new(args.clone()));
     let locked_silos = Arc::new(RwLock::new(silos));
 
-    spawn_balancer(locked_silos.clone(), dsn).await;
+    spawn_db_listener(dsn.clone(), args.cache, locked_silos.clone()).await;
     spawn_summary(locked_stats.clone());
 
     // GET /stats -> show stats

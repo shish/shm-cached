@@ -1,8 +1,8 @@
-use structopt::StructOpt;
-use std::sync::Arc;
-use tokio::sync::RwLock;
 use flexihash::Flexihash;
 use std::collections::HashMap;
+use std::sync::Arc;
+use structopt::StructOpt;
+use tokio::sync::RwLock;
 
 #[derive(Default, Debug)]
 pub struct Stats {
@@ -17,7 +17,7 @@ pub struct Stats {
 
 pub type GlobalStats = Arc<RwLock<Stats>>;
 
-#[derive(StructOpt)]
+#[derive(StructOpt, Clone)]
 #[structopt(about = "HTTP cache optimised for Shimmie galleries")]
 pub struct Args {
     /// Where the cached files should be stored
@@ -35,4 +35,3 @@ pub struct Args {
 
 pub type GlobalArgs = Arc<RwLock<Args>>;
 pub type GlobalSilos = Arc<RwLock<HashMap<String, Flexihash>>>;
-
