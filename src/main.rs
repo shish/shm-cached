@@ -54,7 +54,11 @@ fn spawn_summary(locked_stats: GlobalStats) {
         loop {
             {
                 let stats = locked_stats.read().await;
-                println!("hits={} misses={}", stats.hits, stats.misses);
+                println!(
+                    "requests={} hits={} misses={} errors={} invalid={} missing={} redirect={}",
+                    stats.requests, stats.hits, stats.misses, stats.errors,
+                    stats.invalid, stats.missing, stats.redirect
+                );
             }
             tokio::time::delay_for(Duration::from_secs(60)).await;
         }
