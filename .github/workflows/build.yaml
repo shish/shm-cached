@@ -42,7 +42,8 @@ jobs:
           command: build
           args: --release
       - name: Publish
-        uses: actions/upload-artifact@v2
+        uses: eine/tip@master
         with:
-          name: shm-cached
-          path: target/release/shm-cached
+          token: ${{ secrets.GITHUB_TOKEN }}
+          files: |
+            target/release/shm-cached
