@@ -27,7 +27,7 @@ async fn main() {
     let locked_args = Arc::new(RwLock::new(args.clone()));
     let locked_silos = Arc::new(RwLock::new(silos));
 
-    spawn_db_listener(dsn.clone(), args.cache, locked_silos.clone()).await;
+    spawn_db_listener(dsn.clone(), args.cache, locked_silos.clone(), locked_stats.clone()).await;
     spawn_summary(locked_stats.clone());
 
     // GET /stats -> show stats
@@ -53,12 +53,8 @@ fn spawn_summary(locked_stats: GlobalStats) {
     tokio::spawn(async move {
         loop {
             {
-                let stats = locked_stats.read().await;
-                println!(
-                    "requests={} hits={} misses={} errors={} invalid={} missing={} redirect={}",
-                    stats.requests, stats.hits, stats.misses, stats.errors,
-                    stats.invalid, stats.missing, stats.redirect
-                );
+                let stats = *locked_stats.read().await;
+                println!("{}", stats);
             }
             tokio::time::delay_for(Duration::from_secs(60)).await;
         }
@@ -69,13 +65,14 @@ async fn show_stats(locked_stats: GlobalStats) -> Result<impl warp::reply::Reply
     let stats = locked_stats.read().await;
     // Ok(warp::reply::json(stats))
     Ok(format!(
-        "Requests: {}
+        "{}
 Hits: {}
 Misses: {}
 Errors: {}
 Invalid: {}
 Missing: {}
 Redirect: {}
+Purged: {}
 ",
         stats.requests,
         stats.hits,
@@ -83,7 +80,8 @@ Redirect: {}
         stats.errors,
         stats.invalid,
         stats.missing,
-        stats.redirect
+        stats.redirect,
+        stats.purged,
     ))
 }
 

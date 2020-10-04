@@ -13,6 +13,18 @@ pub struct Stats {
     pub errors: usize,
     pub missing: usize,
     pub redirect: usize,
+    pub purged: usize,
+}
+
+impl std::fmt::Display for Stats {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "requests={} hits={} misses={} errors={} invalid={} missing={} redirect={} purged={}",
+            self.requests, self.hits, self.misses, self.errors,
+            self.invalid, self.missing, self.redirect, self.purged
+        )
+    }
 }
 
 pub type GlobalStats = Arc<RwLock<Stats>>;

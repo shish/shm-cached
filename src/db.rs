@@ -5,9 +5,9 @@ use futures::{future, stream, StreamExt};
 use std::path::Path;
 use tokio_postgres::{AsyncMessage, NoTls};
 
-use crate::types::GlobalSilos;
+use crate::types::{GlobalSilos,GlobalStats};
 
-pub async fn spawn_db_listener(dsn: String, cache: String, locked_silos: GlobalSilos) {
+pub async fn spawn_db_listener(dsn: String, cache: String, locked_silos: GlobalSilos, locked_stats: GlobalStats) {
     let (client, mut connection) = tokio_postgres::connect(dsn.as_str(), NoTls).await.unwrap();
 
     let (tx, mut rx) = mpsc::unbounded();
@@ -41,6 +41,10 @@ pub async fn spawn_db_listener(dsn: String, cache: String, locked_silos: GlobalS
                     populate_silo(&locked_silos, &client, "_images", "image_ilink").await;
                 }
                 if notification.channel() == "shm_image_bans" {
+                    {
+                        let mut stats = locked_stats.write().await;
+                        stats.purged += 1;
+                    }
                     clean(&cache, &locked_silos, notification.payload()).await;
                 }
             }
