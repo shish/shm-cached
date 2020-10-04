@@ -47,3 +47,4 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
           files: |
             target/release/shm-cached
+          rm: true
