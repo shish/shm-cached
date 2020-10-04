@@ -6,7 +6,6 @@ use std::sync::Arc;
 use std::time::{Duration, UNIX_EPOCH};
 use structopt::StructOpt;
 use tokio::sync::RwLock;
-use utime;
 use warp::{http::Response, http::Uri, Filter};
 
 mod db;
@@ -71,8 +70,7 @@ fn spawn_summary(locked_stats: GlobalStats) {
 async fn show_stats(locked_stats: GlobalStats) -> Result<impl warp::reply::Reply, warp::Rejection> {
     let stats = locked_stats.read().await;
     // Ok(warp::reply::json(stats))
-    let ret = format!("{}", stats.to_string());
-    Ok(ret)
+    Ok(stats.to_string())
 }
 
 async fn handle_request(
@@ -86,7 +84,7 @@ async fn handle_request(
 ) -> Result<Box<dyn warp::Reply>, warp::Rejection> {
     let args = locked_args.read().await;
     let silos = locked_silos.read().await;
-    let me = host.split(".").next().unwrap().to_string();
+    let me = host.split('.').next().unwrap().to_string();
 
     {
         let mut stats = locked_stats.write().await;

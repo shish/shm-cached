@@ -79,10 +79,10 @@ async fn populate_silo(
 
     let mut fh = Flexihash::new();
 
-    for target in targets.split(",") {
-        let parts: Vec<&str> = target.split("=").collect();
+    for target in targets.split(',') {
+        let parts: Vec<&str> = target.split('=').collect();
         let (target, weight) = match parts.len() {
-            2 => (parts[0].clone(), parts[1].clone()),
+            2 => (parts[0], parts[1]),
             _ => panic!("Invalid target"),
         };
         fh.add_target(target, u32::from_str_radix(weight, 10).unwrap());
@@ -92,10 +92,10 @@ async fn populate_silo(
     silos.insert(name.to_string(), fh);
 }
 
-async fn clean(cache: &String, locked_silos: &GlobalSilos, hash: &str) {
+async fn clean(cache: &str, locked_silos: &GlobalSilos, hash: &str) {
     let silos = locked_silos.read().await;
     for silo in silos.keys() {
-        let path = Path::new(cache.as_str())
+        let path = Path::new(cache)
             .join(&silo)
             .join(&hash[0..2])
             .join(&hash[2..4])
