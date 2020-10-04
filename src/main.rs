@@ -59,19 +59,19 @@ fn spawn_summary(locked_stats: GlobalStats) {
     tokio::spawn(async move {
         loop {
             {
-                let stats = locked_stats.read().await;
+                let mut stats = locked_stats.write().await;
                 println!("{}", stats.to_string());
+                stats.reset();
             }
-            tokio::time::delay_for(Duration::from_secs(60)).await;
+            tokio::time::delay_for(Duration::from_secs(6)).await;
         }
     });
 }
 
 async fn show_stats(locked_stats: GlobalStats) -> Result<impl warp::reply::Reply, warp::Rejection> {
-    let mut stats = locked_stats.write().await;
+    let stats = locked_stats.read().await;
     // Ok(warp::reply::json(stats))
     let ret = format!("{}", stats.to_string());
-    stats.reset();
     Ok(ret)
 }
 
