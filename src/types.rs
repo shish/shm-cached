@@ -21,9 +21,28 @@ impl std::fmt::Display for Stats {
         write!(
             f,
             "requests={} hits={} misses={} errors={} invalid={} missing={} redirect={} purged={}",
-            self.requests, self.hits, self.misses, self.errors,
-            self.invalid, self.missing, self.redirect, self.purged
+            self.requests,
+            self.hits,
+            self.misses,
+            self.errors,
+            self.invalid,
+            self.missing,
+            self.redirect,
+            self.purged
         )
+    }
+}
+
+impl Stats {
+    pub fn reset(&mut self) {
+        self.requests = 0;
+        self.hits = 0;
+        self.misses = 0;
+        self.errors = 0;
+        self.invalid = 0;
+        self.missing = 0;
+        self.redirect = 0;
+        self.purged = 0;
     }
 }
 
