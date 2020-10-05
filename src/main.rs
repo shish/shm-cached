@@ -125,7 +125,7 @@ async fn handle_request(
         let target = format!("https://{}.paheal.net/{}/{}/{}", owner, silo, hash, human)
             .parse::<Uri>()
             .unwrap();
-        
+
         let mut stats = locked_stats.write().await;
         stats.redirect += 1;
         return Ok(Box::new(warp::redirect(target)));
@@ -135,9 +135,17 @@ async fn handle_request(
     // If we own this image and it's on disk, serve it
     // ================================================================
     if path.exists() {
+        {
+            let mut stats = locked_stats.write().await;
+            stats.block_disk_read += 1;
+        }
         let mtime_secs = utime::get_file_times(path.clone()).unwrap().1;
         let mtime = UNIX_EPOCH + Duration::from_secs(mtime_secs as u64);
         let body = fs::read(path).unwrap();
+        {
+            let mut stats = locked_stats.write().await;
+            stats.block_disk_read -= 1;
+        }
 
         let mut stats = locked_stats.write().await;
         stats.hits += 1;
@@ -154,6 +162,11 @@ async fn handle_request(
     // ================================================================
     // If we own this image and it's missing, fetch it
     // ================================================================
+    {
+        let mut stats = locked_stats.write().await;
+        stats.block_net_read += 1;
+    }
+
     let res = reqwest::get(url.to_str().unwrap()).await.unwrap();
     let headers = res.headers();
     if res.status() != reqwest::StatusCode::OK {
@@ -165,11 +178,23 @@ async fn handle_request(
     let mtime =
         httpdate::parse_http_date(headers.get("last-modified").unwrap().to_str().unwrap()).unwrap();
     let body = res.bytes().await.unwrap();
+    {
+        let mut stats = locked_stats.write().await;
+        stats.block_net_read -= 1;
+    }
 
+    {
+        let mut stats = locked_stats.write().await;
+        stats.block_disk_write += 1;
+    }
     fs::create_dir_all(path.parent().unwrap()).expect("Failed to create parent dir");
     fs::write(path.clone(), &body).expect("Failed to write file");
     let mtime_secs = mtime.duration_since(UNIX_EPOCH).unwrap().as_secs() as i64;
     utime::set_file_times(path.clone(), mtime_secs, mtime_secs).expect("Failed to set mtime");
+    {
+        let mut stats = locked_stats.write().await;
+        stats.block_disk_write -= 1;
+    }
 
     let mut stats = locked_stats.write().await;
     stats.misses += 1;
