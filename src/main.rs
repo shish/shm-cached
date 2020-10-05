@@ -82,6 +82,36 @@ async fn handle_request(
     locked_silos: GlobalSilos,
     host: String,
 ) -> Result<Box<dyn warp::Reply>, warp::Rejection> {
+    {
+        let mut stats = locked_stats.write().await;
+        stats.inflight += 1;
+    }
+    let ret = handle_request_inner(
+        silo,
+        hash,
+        human,
+        locked_args,
+        locked_stats.clone(),
+        locked_silos,
+        host,
+    )
+    .await;
+    {
+        let mut stats = locked_stats.write().await;
+        stats.inflight -= 1;
+    }
+    return ret;
+}
+
+async fn handle_request_inner(
+    silo: String,
+    hash: String,
+    human: String,
+    locked_args: GlobalArgs,
+    locked_stats: GlobalStats,
+    locked_silos: GlobalSilos,
+    host: String,
+) -> Result<Box<dyn warp::Reply>, warp::Rejection> {
     let args = locked_args.read().await;
     let silos = locked_silos.read().await;
     let me = host.split('.').next().unwrap().to_string();
