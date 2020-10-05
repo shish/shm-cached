@@ -1,6 +1,6 @@
 #![feature(poll_map)]
 use std::collections::HashMap;
-use std::fs;
+use tokio::fs;
 use std::path::Path;
 use std::sync::Arc;
 use std::time::{Duration, UNIX_EPOCH};
@@ -171,7 +171,7 @@ async fn handle_request_inner(
         }
         let mtime_secs = utime::get_file_times(path.clone()).unwrap().1;
         let mtime = UNIX_EPOCH + Duration::from_secs(mtime_secs as u64);
-        let body = fs::read(path).unwrap();
+        let body = fs::read(path).await.unwrap();
         {
             let mut stats = locked_stats.write().await;
             stats.block_disk_read -= 1;
@@ -217,8 +217,8 @@ async fn handle_request_inner(
         let mut stats = locked_stats.write().await;
         stats.block_disk_write += 1;
     }
-    fs::create_dir_all(path.parent().unwrap()).expect("Failed to create parent dir");
-    fs::write(path.clone(), &body).expect("Failed to write file");
+    fs::create_dir_all(path.parent().unwrap()).await.expect("Failed to create parent dir");
+    fs::write(path.clone(), &body).await.expect("Failed to write file");
     let mtime_secs = mtime.duration_since(UNIX_EPOCH).unwrap().as_secs() as i64;
     utime::set_file_times(path.clone(), mtime_secs, mtime_secs).expect("Failed to set mtime");
     {
