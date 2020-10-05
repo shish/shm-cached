@@ -62,7 +62,7 @@ fn spawn_summary(locked_stats: GlobalStats) {
                 println!("{}", stats.to_string());
                 stats.reset();
             }
-            tokio::time::delay_for(Duration::from_secs(6)).await;
+            tokio::time::delay_for(Duration::from_secs(10)).await;
         }
     });
 }
