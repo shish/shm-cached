@@ -14,8 +14,8 @@ pub struct Stats {
     pub missing: usize,
     pub purged: usize,
     pub inflight: usize,
-    pub block_disk_read: usize,
-    pub block_net_read: usize,
+    pub block_disk: usize,
+    pub block_net: usize,
 }
 
 impl std::fmt::Display for Stats {
@@ -31,8 +31,8 @@ impl std::fmt::Display for Stats {
             self.missing,
             self.purged,
             self.inflight,
-            self.block_net_read,
-            self.block_disk_read,
+            self.block_net,
+            self.block_disk,
         )
     }
 }

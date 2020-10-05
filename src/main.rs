@@ -131,7 +131,7 @@ async fn handle_request_inner(
         }
     };
 
-    let (path, url,) = {
+    let (path, url) = {
         let args = locked_args.read().await;
         (
             Path::new(args.cache.as_str())
@@ -174,14 +174,14 @@ async fn handle_request_inner(
     if path.exists() {
         {
             let mut stats = locked_stats.write().await;
-            stats.block_disk_read += 1;
+            stats.block_disk += 1;
         }
         let mtime_secs = utime::get_file_times(path.clone()).unwrap().1;
         let mtime = UNIX_EPOCH + Duration::from_secs(mtime_secs as u64);
         let body = fs::read(path).await.unwrap();
         {
             let mut stats = locked_stats.write().await;
-            stats.block_disk_read -= 1;
+            stats.block_disk -= 1;
         }
 
         let mut stats = locked_stats.write().await;
@@ -201,24 +201,24 @@ async fn handle_request_inner(
     // ================================================================
     {
         let mut stats = locked_stats.write().await;
-        stats.block_net_read += 1;
+        stats.block_net += 1;
+    }
+    let res = reqwest::get(url.to_str().unwrap()).await.unwrap();
+    {
+        let mut stats = locked_stats.write().await;
+        stats.block_net -= 1;
     }
 
-    let res = reqwest::get(url.to_str().unwrap()).await.unwrap();
-    let headers = res.headers();
     if res.status() != reqwest::StatusCode::OK {
         let mut stats = locked_stats.write().await;
         stats.missing += 1;
         return Err(warp::reject::not_found());
     }
 
+    let headers = res.headers();
     let mtime =
         httpdate::parse_http_date(headers.get("last-modified").unwrap().to_str().unwrap()).unwrap();
     let body = res.bytes().await.unwrap();
-    {
-        let mut stats = locked_stats.write().await;
-        stats.block_net_read -= 1;
-    }
 
     let body_to_write = body.clone();
     tokio::spawn(async move {
