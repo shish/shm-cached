@@ -96,7 +96,7 @@ async fn handle_request(
         None => {
             let mut stats = locked_stats.write().await;
             stats.invalid += 1;
-            panic!("No such silo: {}", silo)
+            return Err(warp::reject::not_found());
         }
     };
 
@@ -116,10 +116,6 @@ async fn handle_request(
     let owner = owners.get(0).unwrap().clone();
     let backup = owners.get(1).unwrap().clone();
     if owner != me && backup != me {
-        {
-            let mut stats = locked_stats.write().await;
-            stats.redirect += 1;
-        }
         if path.exists() {
             if let Err(x) = std::fs::remove_file(path.clone()) {
                 println!("Failed to remove {:?}: {}", path, x);
@@ -129,6 +125,9 @@ async fn handle_request(
         let target = format!("https://{}.paheal.net/{}/{}/{}", owner, silo, hash, human)
             .parse::<Uri>()
             .unwrap();
+        
+        let mut stats = locked_stats.write().await;
+        stats.redirect += 1;
         return Ok(Box::new(warp::redirect(target)));
     }
 
@@ -136,15 +135,12 @@ async fn handle_request(
     // If we own this image and it's on disk, serve it
     // ================================================================
     if path.exists() {
-        {
-            let mut stats = locked_stats.write().await;
-            stats.hits += 1;
-        }
-
         let mtime_secs = utime::get_file_times(path.clone()).unwrap().1;
         let mtime = UNIX_EPOCH + Duration::from_secs(mtime_secs as u64);
         let body = fs::read(path).unwrap();
 
+        let mut stats = locked_stats.write().await;
+        stats.hits += 1;
         return Ok(Box::new(
             Response::builder()
                 .status(200)
@@ -166,11 +162,6 @@ async fn handle_request(
         return Err(warp::reject::not_found());
     }
 
-    {
-        let mut stats = locked_stats.write().await;
-        stats.misses += 1;
-    }
-
     let mtime =
         httpdate::parse_http_date(headers.get("last-modified").unwrap().to_str().unwrap()).unwrap();
     let body = res.bytes().await.unwrap();
@@ -180,6 +171,8 @@ async fn handle_request(
     let mtime_secs = mtime.duration_since(UNIX_EPOCH).unwrap().as_secs() as i64;
     utime::set_file_times(path.clone(), mtime_secs, mtime_secs).expect("Failed to set mtime");
 
+    let mut stats = locked_stats.write().await;
+    stats.misses += 1;
     return Ok(Box::new(
         Response::builder()
             .status(200)
