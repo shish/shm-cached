@@ -213,18 +213,14 @@ async fn handle_request_inner(
         stats.block_net_read -= 1;
     }
 
-    {
-        let mut stats = locked_stats.write().await;
-        stats.block_disk_write += 1;
-    }
-    fs::create_dir_all(path.parent().unwrap()).await.expect("Failed to create parent dir");
-    fs::write(path.clone(), &body).await.expect("Failed to write file");
-    let mtime_secs = mtime.duration_since(UNIX_EPOCH).unwrap().as_secs() as i64;
-    utime::set_file_times(path.clone(), mtime_secs, mtime_secs).expect("Failed to set mtime");
-    {
-        let mut stats = locked_stats.write().await;
-        stats.block_disk_write -= 1;
-    }
+    let body_to_write = body.clone();
+    tokio::spawn(async move {
+        fs::create_dir_all(path.parent().unwrap()).await.expect("Failed to create parent dir");
+        fs::write(path.clone(), &body_to_write).await.expect("Failed to write file");
+        let mtime_secs = mtime.duration_since(UNIX_EPOCH).unwrap().as_secs() as i64;
+        utime::set_file_times(path.clone(), mtime_secs, mtime_secs).expect("Failed to set mtime");
+    });
+
 
     let mut stats = locked_stats.write().await;
     stats.misses += 1;
