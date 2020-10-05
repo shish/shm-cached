@@ -1,10 +1,10 @@
 #![feature(poll_map)]
 use std::collections::HashMap;
-use tokio::fs;
 use std::path::Path;
 use std::sync::Arc;
 use std::time::{Duration, UNIX_EPOCH};
 use structopt::StructOpt;
+use tokio::fs;
 use tokio::sync::RwLock;
 use warp::{http::Response, http::Uri, Filter};
 
@@ -112,8 +112,6 @@ async fn handle_request_inner(
     locked_silos: GlobalSilos,
     host: String,
 ) -> Result<Box<dyn warp::Reply>, warp::Rejection> {
-    let args = locked_args.read().await;
-    let silos = locked_silos.read().await;
     let me = host.split('.').next().unwrap().to_string();
 
     {
@@ -121,24 +119,32 @@ async fn handle_request_inner(
         stats.requests += 1;
     }
 
-    let owners = match silos.get(&silo) {
-        Some(s) => s.lookup_list(&hash, 2),
-        None => {
-            let mut stats = locked_stats.write().await;
-            stats.invalid += 1;
-            return Err(warp::reject::not_found());
+    let owners = {
+        let silos = locked_silos.read().await;
+        match silos.get(&silo) {
+            Some(s) => s.lookup_list(&hash, 2),
+            None => {
+                let mut stats = locked_stats.write().await;
+                stats.invalid += 1;
+                return Err(warp::reject::not_found());
+            }
         }
     };
 
-    let path = Path::new(args.cache.as_str())
-        .join(&silo)
-        .join(&hash[0..2])
-        .join(&hash[2..4])
-        .join(&hash);
-    let url = Path::new(args.backend.as_str())
-        .join(&silo)
-        .join(&hash)
-        .join("human.jpg");
+    let (path, url,) = {
+        let args = locked_args.read().await;
+        (
+            Path::new(args.cache.as_str())
+                .join(&silo)
+                .join(&hash[0..2])
+                .join(&hash[2..4])
+                .join(&hash),
+            Path::new(args.backend.as_str())
+                .join(&silo)
+                .join(&hash)
+                .join("human.jpg"),
+        )
+    };
 
     // ================================================================
     // If we don't own this image, redirect to the owner
@@ -147,11 +153,12 @@ async fn handle_request_inner(
     let backup = owners.get(1).unwrap().clone();
     if owner != me && backup != me {
         if path.exists() {
-            if let Err(x) = std::fs::remove_file(path.clone()) {
+            if let Err(x) = fs::remove_file(path.clone()).await {
                 println!("Failed to remove {:?}: {}", path, x);
             }
         }
 
+        // TODO: parse this out of the image_ilink / tlink etc
         let target = format!("https://{}.paheal.net/{}/{}/{}", owner, silo, hash, human)
             .parse::<Uri>()
             .unwrap();
@@ -215,12 +222,15 @@ async fn handle_request_inner(
 
     let body_to_write = body.clone();
     tokio::spawn(async move {
-        fs::create_dir_all(path.parent().unwrap()).await.expect("Failed to create parent dir");
-        fs::write(path.clone(), &body_to_write).await.expect("Failed to write file");
+        fs::create_dir_all(path.parent().unwrap())
+            .await
+            .expect("Failed to create parent dir");
+        fs::write(path.clone(), &body_to_write)
+            .await
+            .expect("Failed to write file");
         let mtime_secs = mtime.duration_since(UNIX_EPOCH).unwrap().as_secs() as i64;
         utime::set_file_times(path.clone(), mtime_secs, mtime_secs).expect("Failed to set mtime");
     });
-
 
     let mut stats = locked_stats.write().await;
     stats.misses += 1;
