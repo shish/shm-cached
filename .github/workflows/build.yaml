@@ -23,7 +23,7 @@ jobs:
           ~/.rustup/toolchains
           ~/.rustup/update-hashes
           ~/.rustup/settings.toml
-      key: ${{ runner.os }}-cargo-debug-${{ hashFiles('**/Cargo.lock') }}
+        key: ${{ runner.os }}-rust-debug-${{ hashFiles('**/Cargo.lock') }}
     - name: Set Up Toolchain
       uses: actions-rs/toolchain@v1
       with:
@@ -49,7 +49,10 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: ${{ runner.os }}-cargo-release-${{ hashFiles('**/Cargo.lock') }}
+            ~/.rustup/toolchains
+            ~/.rustup/update-hashes
+            ~/.rustup/settings.toml
+          key: ${{ runner.os }}-rust-release-${{ hashFiles('**/Cargo.lock') }}
       - name: Setup Toolchain
         uses: actions-rs/toolchain@v1
         with:
