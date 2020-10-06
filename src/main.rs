@@ -156,6 +156,8 @@ async fn handle_request_inner(
             if let Err(x) = fs::remove_file(path.clone()).await {
                 println!("Failed to remove {:?}: {}", path, x);
             }
+            let mut stats = locked_stats.write().await;
+            stats.cleaned += 1;
         }
         */
 
