@@ -32,7 +32,7 @@ async fn main() {
         locked_stats.clone(),
     )
     .await;
-    spawn_summary(locked_stats.clone());
+    spawn_summary(locked_stats.clone(), args.interval);
 
     // GET /stats -> show stats
     let locked_stats2 = locked_stats.clone();
@@ -53,7 +53,7 @@ async fn main() {
     warp::serve(routes).run(([0, 0, 0, 0], 8050)).await;
 }
 
-fn spawn_summary(locked_stats: GlobalStats) {
+fn spawn_summary(locked_stats: GlobalStats, interval: u64) {
     tokio::spawn(async move {
         loop {
             {
@@ -61,7 +61,7 @@ fn spawn_summary(locked_stats: GlobalStats) {
                 println!("{}", stats.to_string());
                 stats.reset();
             }
-            tokio::time::delay_for(Duration::from_secs(10)).await;
+            tokio::time::delay_for(Duration::from_secs(interval)).await;
         }
     });
 }

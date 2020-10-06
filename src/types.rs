@@ -65,6 +65,10 @@ pub struct Args {
     /// Where should we find our load balancer settings
     #[structopt(short = "d", default_value = "user=test host=localhost")]
     pub dsn: String,
+
+    /// Stats printout interval
+    #[structopt(short = "i", default_value = "60")]
+    pub interval: u64,
 }
 
 pub type GlobalArgs = Arc<RwLock<Args>>;
