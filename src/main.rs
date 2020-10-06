@@ -151,11 +151,13 @@ async fn handle_request_inner(
     let owner = owners.get(0).unwrap().clone();
     let backup = owners.get(1).unwrap().clone();
     if owner != me && backup != me {
+        /*
         if path.exists() {
             if let Err(x) = fs::remove_file(path.clone()).await {
                 println!("Failed to remove {:?}: {}", path, x);
             }
         }
+        */
 
         // TODO: parse this out of the image_ilink / tlink etc
         let target = format!("https://{}.paheal.net/{}/{}/{}", owner, silo, hash, human)
