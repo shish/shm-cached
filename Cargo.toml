@@ -3,6 +3,7 @@ name = "shm-cached"
 version = "0.1.0"
 authors = ["Shish <shish@shishnet.org>"]
 edition = "2018"
+build = "build.rs"
 
 [dependencies]
 # tokio = { version = "0.2", features = ["macros"] }
@@ -16,3 +17,6 @@ utime = "*"
 httpdate = "*"
 reqwest = "*"
 futures = "*"
+
+[build-dependencies]
+vergen = "3"

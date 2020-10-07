@@ -7,6 +7,9 @@ An HTTP cache specifically optimised for Shimmie galleries
 - Gets the load-balancing config by looking at shimmie's config
   database
 - Automatically re-balances whenever the config changes
+- Integrates with the `image_hash_bans` table to automatically
+  purge things from the cache whenever an image is banned from
+  the gallery
 
 Why
 ---
@@ -21,11 +24,6 @@ Why
 - When the balancing config changes, hosts redirect load to the
   new owner instead of lowering their own cache hit rate
 
-TODO
-----
-- Integrate with the `image_hash_bans` table to automatically nuke
-  things from the cache whenever an image is banned from the backend
-
 How to use
 ----------
 - Run this software on the three hosts `mirror-{a,b,c}.mysite.com`
@@ -34,8 +32,10 @@ How to use
 - Shimmie then generates links like
   `https://mirror-c.mysite.com/_images/ab25bc2/42-tagme.jpg`
 - If the user visits the above URL, then
-  - `mirror-c` checks if it is responsible for this file
-  - if it is, and it has a copy, it sends it
-  - if it is, and it doesn't have a copy, it fetches it from the backend
-  - if it isn't responsible (eg the load-balancing config has changed
-    recently), it sends a HTTP redirect to the current owner
+  - `mirror-c` checks to see which mirror is responsible for the file
+    according to the load balancing algorithm. If somebody else is the
+    current owner (eg the user is following an old link from google),
+    it sends an HTTP redirect to that host
+  - If the server is responsible for a file but doesn't have a copy, it
+    fetches from the backend source of truth
+  - The server sends the file to the client

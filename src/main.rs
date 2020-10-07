@@ -17,7 +17,13 @@ use crate::types::*;
 async fn main() {
     let args = Args::from_args();
     let dsn = args.dsn.clone();
+
     pretty_env_logger::init();
+    println!(
+        "shm-cached built on {} - {}",
+        env!("VERGEN_BUILD_DATE"),
+        env!("VERGEN_SHA_SHORT")
+    );
 
     let silos = HashMap::new();
 

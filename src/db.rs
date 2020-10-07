@@ -1,17 +1,18 @@
+use core::task::Poll;
 use flexihash::Flexihash;
 use futures::channel::mpsc;
 use futures::FutureExt;
 use futures::{future, stream, StreamExt};
 use std::path::Path;
 use tokio_postgres::{AsyncMessage, NoTls};
-use core::task::Poll;
 
 use crate::types::{GlobalSilos, GlobalStats};
 
 // Backported from nightly #![feature(poll_map)]
 // https://github.com/rust-lang/rust/pull/63512/files
 pub fn map_err<U, F, T, E>(s: Poll<Option<Result<T, E>>>, f: F) -> Poll<Option<Result<T, U>>>
-    where F: FnOnce(E) -> U
+where
+    F: FnOnce(E) -> U,
 {
     match s {
         Poll::Ready(Some(Ok(t))) => Poll::Ready(Some(Ok(t))),
