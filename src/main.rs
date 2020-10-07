@@ -24,6 +24,7 @@ async fn main() {
         env!("VERGEN_BUILD_DATE"),
         env!("VERGEN_SHA_SHORT")
     );
+    if args.version { return }
 
     let silos = HashMap::new();
 

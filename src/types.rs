@@ -69,6 +69,10 @@ pub struct Args {
     /// Stats printout interval
     #[structopt(short = "i", default_value = "60")]
     pub interval: u64,
+
+    /// Show version
+    #[structopt(long = "version")]
+    pub version: bool,
 }
 
 pub type GlobalArgs = Arc<RwLock<Args>>;
