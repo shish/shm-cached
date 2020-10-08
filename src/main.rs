@@ -24,7 +24,9 @@ async fn main() {
         env!("VERGEN_BUILD_DATE"),
         env!("VERGEN_SHA_SHORT")
     );
-    if args.version { return }
+    if args.version {
+        return;
+    }
 
     let silos = HashMap::new();
 
@@ -155,8 +157,9 @@ async fn handle_request_inner(
     // ================================================================
     // If we don't own this image, redirect to the owner
     // ================================================================
+    let default = "no-backup".to_string();
     let owner = owners.get(0).unwrap().clone();
-    let backup = owners.get(1).unwrap().clone();
+    let backup = owners.get(1).unwrap_or(&default).clone();
     if owner != me && backup != me {
         /*
         if path.exists() {
