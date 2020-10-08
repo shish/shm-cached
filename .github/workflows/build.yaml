@@ -9,6 +9,9 @@ on:
 jobs:
   build:
     name: Build
+    strategy:
+      matrix:
+        toolchain: 1.47.0
     runs-on: ubuntu-latest
     steps:
     - name: Checkout
@@ -23,20 +26,20 @@ jobs:
           ~/.rustup/toolchains
           ~/.rustup/update-hashes
           ~/.rustup/settings.toml
-        key: ${{ runner.os }}-rust-${{ hashFiles('**/Cargo.lock') }}
+        key: ${{ runner.os }}-rust-${{ matrix.toolchain }}-${{ hashFiles('**/Cargo.lock') }}
     - name: Set Up Toolchain
       uses: actions-rs/toolchain@v1
       with:
-        toolchain: stable
+        toolchain: ${{ matrix.toolchain }}
     - name: Build Debug
       uses: actions-rs/cargo@v1
       with:
-        toolchain: stable
+        toolchain: ${{ matrix.toolchain }}
         command: build
     - name: Build Release
       uses: actions-rs/cargo@v1
       with:
-        toolchain: stable
+        toolchain: ${{ matrix.toolchain }}
         command: build
         args: --release
   
@@ -58,15 +61,15 @@ jobs:
             ~/.rustup/toolchains
             ~/.rustup/update-hashes
             ~/.rustup/settings.toml
-          key: ${{ runner.os }}-rust-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ runner.os }}-rust-${{ matrix.toolchain }}-${{ hashFiles('**/Cargo.lock') }}
       - name: Setup Toolchain
         uses: actions-rs/toolchain@v1
         with:
-          toolchain: stable
+          toolchain: ${{ matrix.toolchain }}
       - name: Build
         uses: actions-rs/cargo@v1
         with:
-          toolchain: stable
+          toolchain: ${{ matrix.toolchain }}
           command: build
           args: --release
       - name: Publish
