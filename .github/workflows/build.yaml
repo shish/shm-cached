@@ -45,6 +45,9 @@ jobs:
   
   publish:
     name: Publish
+    strategy:
+      matrix:
+        toolchain: ["1.47.0"]
     runs-on: ubuntu-latest
     needs: build
     if: github.event_name == 'push'
