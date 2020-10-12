@@ -17,6 +17,7 @@ utime = "*"
 httpdate = "*"
 reqwest = "*"
 futures = "*"
+log = "*"
 
 [build-dependencies]
 vergen = "3"

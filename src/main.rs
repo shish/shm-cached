@@ -10,6 +10,8 @@ use warp::{http::Response, http::Uri, Filter};
 mod db;
 mod types;
 
+#[macro_use] extern crate log;
+
 use crate::db::spawn_db_listener;
 use crate::types::*;
 
@@ -19,7 +21,7 @@ async fn main() {
     let dsn = args.dsn.clone();
 
     pretty_env_logger::init();
-    println!(
+    info!(
         "shm-cached built on {} - {}",
         env!("VERGEN_BUILD_DATE"),
         env!("VERGEN_SHA_SHORT")
@@ -41,7 +43,7 @@ async fn main() {
         locked_stats.clone(),
     )
     .await;
-    spawn_summary(locked_stats.clone(), args.interval);
+    spawn_summary(locked_stats.clone());
 
     // GET /stats -> show stats
     let locked_stats2 = locked_stats.clone();
@@ -62,15 +64,25 @@ async fn main() {
     warp::serve(routes).run(([0, 0, 0, 0], 8050)).await;
 }
 
-fn spawn_summary(locked_stats: GlobalStats, interval: u64) {
+fn spawn_summary(locked_stats: GlobalStats) {
     tokio::spawn(async move {
+        let mut last_hit = 0;
+        let mut last_miss = 0;
+        let socket = std::net::UdpSocket::bind("127.0.0.1:51451").expect("failed to bind host socket");
         loop {
             {
-                let mut stats = locked_stats.write().await;
-                println!("{}", stats.to_string());
-                stats.reset();
+                let stats = locked_stats.read().await;
+
+                let total = stats.hits - last_hit + stats.misses - last_miss;
+                let hitrate = if total > 0 {(stats.hits - last_hit) * 100 / total} else {0};
+                let msg = format!("shm_cached {},hitrate={}", stats.to_string(), hitrate);
+                debug!("{}", msg);
+                socket.send_to(msg.as_bytes(), "127.0.0.1:8094").expect("failed to send message");
+
+                last_hit = stats.hits;
+                last_miss = stats.misses;
             }
-            tokio::time::delay_for(Duration::from_secs(interval)).await;
+            tokio::time::delay_for(Duration::from_secs(10)).await;                
         }
     });
 }
@@ -164,7 +176,7 @@ async fn handle_request_inner(
         /*
         if path.exists() {
             if let Err(x) = fs::remove_file(path.clone()).await {
-                println!("Failed to remove {:?}: {}", path, x);
+                error!("Failed to remove {:?}: {}", path, x);
             }
             let mut stats = locked_stats.write().await;
             stats.cleaned += 1;

@@ -25,7 +25,7 @@ impl std::fmt::Display for Stats {
             f,
             //"requests={} hits={} misses={} redirect={} invalid={} missing={} \
             //purged={} cleaned={} inflight={} net_read={} disk_read={}",
-            "requests={} hits={} misses={} redirect={} invalid={} missing={}",
+            "requests={},hits={},misses={},redirect={},invalid={},missing={}",
             self.requests,
             self.hits,
             self.misses,
@@ -33,19 +33,6 @@ impl std::fmt::Display for Stats {
             self.invalid,
             self.missing,
         )
-    }
-}
-
-impl Stats {
-    pub fn reset(&mut self) {
-        self.requests = 0;
-        self.hits = 0;
-        self.misses = 0;
-        self.invalid = 0;
-        self.missing = 0;
-        self.redirect = 0;
-        self.purged = 0;
-        self.cleaned = 0;
     }
 }
 
@@ -65,10 +52,6 @@ pub struct Args {
     /// Where should we find our load balancer settings
     #[structopt(short = "d", default_value = "user=test host=localhost")]
     pub dsn: String,
-
-    /// Stats printout interval
-    #[structopt(short = "i", default_value = "60")]
-    pub interval: u64,
 
     /// Show version
     #[structopt(long = "version")]

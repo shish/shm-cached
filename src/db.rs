@@ -91,7 +91,7 @@ async fn populate_silo(
 
     let parts: Vec<&str> = targets.split(|c| c == '{' || c == '}').collect();
     let targets = parts.get(1).unwrap();
-    println!("{} -> {}", name, targets);
+    info!("{} -> {}", name, targets);
 
     let mut fh = Flexihash::new();
 
@@ -104,7 +104,7 @@ async fn populate_silo(
         fh.add_target(target, u32::from_str_radix(weight, 10).unwrap());
     }
 
-    // println!("{} -> {}", name, fh);
+    // info!("{} -> {}", name, fh);
     silos.insert(name.to_string(), fh);
 }
 
@@ -118,9 +118,9 @@ async fn clean(cache: &str, locked_silos: &GlobalSilos, hash: &str) {
             .join(&hash);
         if path.exists() {
             if let Err(x) = std::fs::remove_file(path.clone()) {
-                println!("Failed to remove {:?}: {}", path, x);
+                warn!("Failed to remove {:?}: {}", path, x);
             } else {
-                println!("Purged {:?}", path);
+                debug!("Purged {:?}", path);
             }
         }
     }
