@@ -68,19 +68,21 @@ fn spawn_summary(locked_stats: GlobalStats) {
     tokio::spawn(async move {
         let mut last_hit = 0;
         let mut last_miss = 0;
+        let mut last_hitrate = 0;
         let socket = std::net::UdpSocket::bind("127.0.0.1:51451").expect("failed to bind host socket");
         loop {
             {
                 let stats = locked_stats.read().await;
 
                 let total = stats.hits - last_hit + stats.misses - last_miss;
-                let hitrate = if total > 0 {(stats.hits - last_hit) * 100 / total} else {0};
+                let hitrate = if total > 0 {(stats.hits - last_hit) * 100 / total} else {last_hitrate};
                 let msg = format!("shm_cached {},hitrate={}", stats.to_string(), hitrate);
                 debug!("{}", msg);
                 socket.send_to(msg.as_bytes(), "127.0.0.1:8094").expect("failed to send message");
 
                 last_hit = stats.hits;
                 last_miss = stats.misses;
+                last_hitrate = hitrate;
             }
             tokio::time::delay_for(Duration::from_secs(10)).await;                
         }
