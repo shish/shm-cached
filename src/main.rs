@@ -178,7 +178,19 @@ async fn handle_request_inner(
         let mut stats = locked_stats.write().await;
         stats.requests += 1;
     }
-    let content_type = if human.ends_with(".mp4") {"video/mp4"} else {"image/jpeg"};
+    let content_type = if human.ends_with(".mp4") {
+        "video/mp4"
+    } else if human.ends_with(".webm") {
+        "video/webm"
+    } else if human.ends_with(".gif") {
+        "image/gif"
+    } else if human.ends_with(".png") {
+        "image/png"
+    } else if human.ends_with(".webp") {
+        "image/webp"
+    } else {
+        "image/jpeg"
+    };
 
     let owners = {
         let silos = locked_silos.read().await;
