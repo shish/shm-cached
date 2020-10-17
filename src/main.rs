@@ -70,8 +70,7 @@ async fn main() {
             .key_path(format!("{}/privkey.pem", tls))
             .run(([0, 0, 0, 0], 443));
         futures::future::join(http, https).await;
-    }
-    else {
+    } else {
         warp::serve(routes.clone()).run(([0, 0, 0, 0], 8050)).await;
     }
 }
@@ -81,8 +80,6 @@ fn spawn_summary(locked_stats: GlobalStats) {
         let mut last_hit = 0;
         let mut last_miss = 0;
         let mut last_hitrate = 0;
-        let socket =
-            std::net::UdpSocket::bind("127.0.0.1:51451").expect("failed to bind host socket");
         loop {
             {
                 let stats = locked_stats.read().await;
@@ -95,9 +92,13 @@ fn spawn_summary(locked_stats: GlobalStats) {
                 };
                 let msg = format!("shm_cached {},hitrate={}", stats.to_string(), hitrate);
                 debug!("{}", msg);
-                socket
-                    .send_to(msg.as_bytes(), "127.0.0.1:8094")
-                    .expect("failed to send message");
+                {
+                    let socket = std::net::UdpSocket::bind("127.0.0.1:0")
+                        .expect("failed to bind host socket");
+                    socket
+                        .send_to(msg.as_bytes(), "127.0.0.1:8094")
+                        .expect("failed to send message");
+                }
 
                 last_hit = stats.hits;
                 last_miss = stats.misses;
