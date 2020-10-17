@@ -124,7 +124,7 @@ fn spawn_summary(locked_stats: GlobalStats) {
                 last_miss = stats.misses;
                 last_hitrate = hitrate;
             }
-            tokio::time::sleep(Duration::from_secs(10)).await;
+            tokio::time::delay_for(Duration::from_secs(10)).await;
         }
     });
 }
