@@ -73,7 +73,7 @@ async fn main() {
         let http = warp::serve(routes.clone()).run(([0, 0, 0, 0], args.port));
         let https = warp::serve(routes)
             .tls()
-            .cert_path(format!("{}/cert.pem", tls))
+            .cert_path(format!("{}/fullchain.pem", tls))
             .key_path(format!("{}/privkey.pem", tls))
             .run(([0, 0, 0, 0], args.sport));
         privdrop(args.user);

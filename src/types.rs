@@ -53,7 +53,7 @@ pub struct Args {
     #[structopt(short = "d", default_value = "user=test host=localhost")]
     pub dsn: String,
 
-    /// Path to a folder containing cert.pem and privkey.pem
+    /// Path to a folder containing fullchain.pem and privkey.pem
     #[structopt(short = "t")]
     pub tls: Option<String>,
 
