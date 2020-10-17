@@ -63,16 +63,16 @@ async fn main() {
     let routes = stats_path.or(cache_path);
 
     if let Some(tls) = args.tls {
-        let http = warp::serve(routes.clone()).run(([0, 0, 0, 0], 8051));
+        let http = warp::serve(routes.clone()).run(([0, 0, 0, 0], args.port));
         let https = warp::serve(routes)
             .tls()
             .cert_path(format!("{}/cert.pem", tls))
             .key_path(format!("{}/privkey.pem", tls))
-            .run(([0, 0, 0, 0], 8052));
+            .run(([0, 0, 0, 0], args.sport));
         privdrop(args.user);
         futures::future::join(http, https).await;
     } else {
-        let http = warp::serve(routes.clone()).run(([0, 0, 0, 0], 8050));
+        let http = warp::serve(routes.clone()).run(([0, 0, 0, 0], args.port));
         privdrop(args.user);
         http.await;
     }
