@@ -31,12 +31,7 @@ jobs:
       uses: actions-rs/toolchain@v1
       with:
         toolchain: ${{ matrix.toolchain }}
-    - name: Build Debug
-      uses: actions-rs/cargo@v1
-      with:
-        toolchain: ${{ matrix.toolchain }}
-        command: build
-    - name: Build Release
+    - name: Build
       uses: actions-rs/cargo@v1
       with:
         toolchain: ${{ matrix.toolchain }}
