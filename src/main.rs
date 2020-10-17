@@ -30,6 +30,10 @@ async fn main() {
     if args.version {
         return;
     }
+    let name = match args.name.clone() {
+        Some(name) => name,
+        None => gethostname::gethostname().into_string().unwrap()
+    };
 
     let silos = HashMap::new();
 
@@ -57,7 +61,7 @@ async fn main() {
         .and(warp::any().map(move || locked_args.clone()))
         .and(warp::any().map(move || locked_stats.clone()))
         .and(warp::any().map(move || locked_silos.clone()))
-        .and(warp::header::<String>("host"))
+        .and(warp::any().map(move || name.clone()))
         .and_then(handle_request);
 
     let routes = stats_path.or(cache_path);

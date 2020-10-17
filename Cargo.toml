@@ -19,6 +19,7 @@ reqwest = "*"
 futures = "*"
 log = "*"
 privdrop = "*"
+gethostname = "*"
 
 [build-dependencies]
 vergen = "3"

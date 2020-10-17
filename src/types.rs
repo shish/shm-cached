@@ -61,6 +61,10 @@ pub struct Args {
     #[structopt(short = "u")]
     pub user: Option<String>,
 
+    /// This host's name
+    #[structopt(short = "n")]
+    pub name: Option<String>,
+
     /// HTTP Port
     #[structopt(short = "p", default_value="8050")]
     pub port: u16,
