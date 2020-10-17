@@ -10,7 +10,8 @@ use warp::{http::Response, http::Uri, Filter};
 mod db;
 mod types;
 
-#[macro_use] extern crate log;
+#[macro_use]
+extern crate log;
 
 use crate::db::spawn_db_listener;
 use crate::types::*;
@@ -61,7 +62,18 @@ async fn main() {
 
     let routes = stats_path.or(cache_path);
 
-    warp::serve(routes).run(([0, 0, 0, 0], 8050)).await;
+    if let Some(tls) = args.tls {
+        let http = warp::serve(routes.clone()).run(([0, 0, 0, 0], 80));
+        let https = warp::serve(routes)
+            .tls()
+            .cert_path(format!("{}/cert.pem", tls))
+            .key_path(format!("{}/privkey.pem", tls))
+            .run(([0, 0, 0, 0], 443));
+        futures::future::join(http, https).await;
+    }
+    else {
+        warp::serve(routes.clone()).run(([0, 0, 0, 0], 8050)).await;
+    }
 }
 
 fn spawn_summary(locked_stats: GlobalStats) {
@@ -69,22 +81,29 @@ fn spawn_summary(locked_stats: GlobalStats) {
         let mut last_hit = 0;
         let mut last_miss = 0;
         let mut last_hitrate = 0;
-        let socket = std::net::UdpSocket::bind("127.0.0.1:51451").expect("failed to bind host socket");
+        let socket =
+            std::net::UdpSocket::bind("127.0.0.1:51451").expect("failed to bind host socket");
         loop {
             {
                 let stats = locked_stats.read().await;
 
                 let total = stats.hits - last_hit + stats.misses - last_miss;
-                let hitrate = if total > 0 {(stats.hits - last_hit) * 100 / total} else {last_hitrate};
+                let hitrate = if total > 0 {
+                    (stats.hits - last_hit) * 100 / total
+                } else {
+                    last_hitrate
+                };
                 let msg = format!("shm_cached {},hitrate={}", stats.to_string(), hitrate);
                 debug!("{}", msg);
-                socket.send_to(msg.as_bytes(), "127.0.0.1:8094").expect("failed to send message");
+                socket
+                    .send_to(msg.as_bytes(), "127.0.0.1:8094")
+                    .expect("failed to send message");
 
                 last_hit = stats.hits;
                 last_miss = stats.misses;
                 last_hitrate = hitrate;
             }
-            tokio::time::delay_for(Duration::from_secs(10)).await;                
+            tokio::time::delay_for(Duration::from_secs(10)).await;
         }
     });
 }

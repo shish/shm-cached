@@ -10,7 +10,7 @@ build = "build.rs"
 flexihash = "*"
 tokio = { version = "0.2", features = ["full"] }
 tokio-postgres = "*"
-warp = "0.2"
+warp = { version = "0.2", features = ["tls"] }
 pretty_env_logger = "*"
 structopt = "*"
 utime = "*"
