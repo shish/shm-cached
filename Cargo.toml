@@ -18,6 +18,7 @@ httpdate = "*"
 reqwest = "*"
 futures = "*"
 log = "*"
+privdrop = "*"
 
 [build-dependencies]
 vergen = "3"

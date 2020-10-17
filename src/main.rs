@@ -69,9 +69,22 @@ async fn main() {
             .cert_path(format!("{}/cert.pem", tls))
             .key_path(format!("{}/privkey.pem", tls))
             .run(([0, 0, 0, 0], 443));
+        privdrop(args.user);
         futures::future::join(http, https).await;
     } else {
-        warp::serve(routes.clone()).run(([0, 0, 0, 0], 8050)).await;
+        let http = warp::serve(routes.clone()).run(([0, 0, 0, 0], 8050));
+        privdrop(args.user);
+        http.await;
+    }
+}
+
+fn privdrop(user: Option<String>) {
+    if let Some(user) = user {
+        privdrop::PrivDrop::default()
+            // .chroot("/var/empty")
+            .user(user)
+            .apply()
+            .unwrap();
     }
 }
 

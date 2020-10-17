@@ -57,6 +57,10 @@ pub struct Args {
     #[structopt(short = "t")]
     pub tls: Option<String>,
 
+    /// User to switch to after binding sockets
+    #[structopt(short = "u")]
+    pub user: Option<String>,
+
     /// Show version
     #[structopt(long = "version")]
     pub version: bool,
