@@ -22,18 +22,21 @@ async fn main() {
     let dsn = args.dsn.clone();
 
     pretty_env_logger::init();
+    let fqdn = gethostname::gethostname().into_string().unwrap();
+    let name = match args.name.clone() {
+        Some(name) => name,
+        None => fqdn.split('.').next().unwrap().to_string(),
+    };
     info!(
-        "shm-cached built on {} - {}",
+        "shm-cached {} built on {} - running on {} ({})",
+        env!("VERGEN_SHA_SHORT"),
         env!("VERGEN_BUILD_DATE"),
-        env!("VERGEN_SHA_SHORT")
+        fqdn,
+        name,
     );
     if args.version {
         return;
     }
-    let name = match args.name.clone() {
-        Some(name) => name,
-        None => gethostname::gethostname().into_string().unwrap()
-    };
 
     let silos = HashMap::new();
 
@@ -139,7 +142,7 @@ async fn handle_request(
     locked_args: GlobalArgs,
     locked_stats: GlobalStats,
     locked_silos: GlobalSilos,
-    host: String,
+    me: String,
 ) -> Result<Box<dyn warp::Reply>, warp::Rejection> {
     {
         let mut stats = locked_stats.write().await;
@@ -152,7 +155,7 @@ async fn handle_request(
         locked_args,
         locked_stats.clone(),
         locked_silos,
-        host,
+        me,
     )
     .await;
     {
@@ -169,10 +172,8 @@ async fn handle_request_inner(
     locked_args: GlobalArgs,
     locked_stats: GlobalStats,
     locked_silos: GlobalSilos,
-    host: String,
+    me: String,
 ) -> Result<Box<dyn warp::Reply>, warp::Rejection> {
-    let me = host.split('.').next().unwrap().to_string();
-
     {
         let mut stats = locked_stats.write().await;
         stats.requests += 1;
