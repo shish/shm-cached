@@ -76,21 +76,24 @@ async fn main() {
 
     let routes = stats_path.or(cache_path);
 
+    let http = warp::serve(routes.clone()).run(([0, 0, 0, 0], args.port));
+    if let Some(tls) = args.tls {
+        let https = warp::serve(routes)
+            .tls()
+            .cert_path(format!("{}/fullchain.pem", tls))
+            .key_path(format!("{}/privkey.pem", tls))
+            .run(([0, 0, 0, 0], args.sport));
+        futures::future::join(http, https).await;
+    } else {
+        http.await;
+    }
+    /*
     // I really want these to be parameters to a separate function, but
     // when I put this in a separate function it throws a bunch of errors
     let port = args.port;
     let sport = args.sport;
     let tls = args.tls;
     let user = args.user;
-    /*
-        bind_then_drop_privs_and_serve(routes, args.port, args.sport, args.tls, args.user).await;
-    }
-
-    async fn bind_then_drop_privs_and_serve<F>(routes: F, port: u16, sport: u16, tls: Option<String>, user: Option<String>)
-    where
-        F: Filter + Clone + Send + Sync + 'static,
-    {
-    */
 
     // Start listening on privileged port(s) while we are root
     let mut http_listener = TcpListener::bind(("0.0.0.0", port)).await.unwrap();
@@ -133,6 +136,7 @@ async fn main() {
         // https_server returns a Result that must be checked
         warn!("Error with https server");
     }
+    */
 }
 
 fn get_tls_config(dir: Option<String>) -> ServerConfig {
