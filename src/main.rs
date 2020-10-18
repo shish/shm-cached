@@ -178,18 +178,14 @@ async fn handle_request_inner(
         let mut stats = locked_stats.write().await;
         stats.requests += 1;
     }
-    let content_type = if human.ends_with(".mp4") {
-        "video/mp4"
-    } else if human.ends_with(".webm") {
-        "video/webm"
-    } else if human.ends_with(".gif") {
-        "image/gif"
-    } else if human.ends_with(".png") {
-        "image/png"
-    } else if human.ends_with(".webp") {
-        "image/webp"
-    } else {
-        "image/jpeg"
+    let ext = human.rsplit(".").next().unwrap().as_ref();
+    let content_type = match ext {
+        "mp4" => "video/mp4",
+        "webm" => "video/webm",
+        "gif" => "image/gif",
+        "png" => "image/png",
+        "webp" => "image/webp",
+        _ => "image/jpeg",
     };
 
     let owners = {
