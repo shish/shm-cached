@@ -23,15 +23,19 @@ impl std::fmt::Display for Stats {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            //"requests={} hits={} misses={} redirect={} invalid={} missing={} \
-            //purged={} cleaned={} inflight={} net_read={} disk_read={}",
-            "requests={},hits={},misses={},redirect={},invalid={},missing={}",
+            "requests={},hits={},misses={},redirect={},invalid={},missing={},\
+            purged={},cleaned={},inflight={},block_net={},block_disk={}",
             self.requests,
             self.hits,
             self.misses,
             self.redirect,
             self.invalid,
             self.missing,
+            self.purged,
+            self.cleaned,
+            self.inflight,
+            self.block_disk,
+            self.block_net,
         )
     }
 }
