@@ -91,14 +91,15 @@ async fn main() {
     } else {
         // I really want these to be parameters to a separate function, but
         // when I put this in a separate function it throws a bunch of errors
+        let addr = args.address.as_str();
         let port = args.port;
         let sport = args.sport;
         let tls = args.tls;
         let user = args.user;
 
         // Start listening on privileged port(s) while we are root
-        let mut http_listener = TcpListener::bind(("0.0.0.0", port)).await.unwrap();
-        let mut https_listener = TcpListener::bind(("0.0.0.0", sport)).await.unwrap();
+        let mut http_listener = TcpListener::bind((addr, port)).await.unwrap();
+        let mut https_listener = TcpListener::bind((addr, sport)).await.unwrap();
 
         // System's TLS certs might also be root-only
         let tls_accept = TlsAcceptor::from(Arc::new(get_tls_config(tls)));

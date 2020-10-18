@@ -69,6 +69,10 @@ pub struct Args {
     #[structopt(short = "n")]
     pub name: Option<String>,
 
+    /// IP address to bind to
+    #[structopt(short = "a", default_value = "0.0.0.0")]
+    pub address: String,
+
     /// HTTP Port
     #[structopt(short = "p", default_value = "8080")]
     pub port: u16,
