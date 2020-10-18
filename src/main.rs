@@ -1,12 +1,19 @@
+use futures::{future, StreamExt, TryStreamExt};
 use std::collections::HashMap;
+use std::convert::Infallible;
+use std::fs::File;
+use std::io::{self, BufReader};
 use std::path::Path;
 use std::sync::Arc;
 use std::time::{Duration, UNIX_EPOCH};
 use structopt::StructOpt;
 use tokio::fs;
+use tokio::net::TcpListener;
 use tokio::sync::RwLock;
+use tokio_rustls::rustls::internal::pemfile::{certs, pkcs8_private_keys};
+use tokio_rustls::rustls::{NoClientAuth, ServerConfig};
+use tokio_rustls::TlsAcceptor;
 use warp::{http::Response, http::Uri, Filter};
-
 mod db;
 mod types;
 
@@ -69,23 +76,27 @@ async fn main() {
 
     let routes = stats_path.or(cache_path);
 
-    if let Some(tls) = args.tls {
-        let http = warp::serve(routes.clone()).run(([0, 0, 0, 0], args.port));
-        let https = warp::serve(routes)
-            .tls()
-            .cert_path(format!("{}/fullchain.pem", tls))
-            .key_path(format!("{}/privkey.pem", tls))
-            .run(([0, 0, 0, 0], args.sport));
-        privdrop(args.user);
-        futures::future::join(http, https).await;
-    } else {
-        let http = warp::serve(routes.clone()).run(([0, 0, 0, 0], args.port));
-        privdrop(args.user);
-        http.await;
+    // I really want these to be parameters to a separate function, but
+    // when I put this in a separate function it throws a bunch of errors
+    let port = args.port;
+    let sport = args.sport;
+    let tls = args.tls;
+    let user = args.user;
+    /*
+        bind_then_drop_privs_and_serve(routes, args.port, args.sport, args.tls, args.user).await;
     }
-}
 
-fn privdrop(user: Option<String>) {
+    async fn bind_then_drop_privs_and_serve<F>(routes: F, port: u16, sport: u16, tls: Option<String>, user: Option<String>)
+    where
+        F: Filter + Clone + Send + Sync + 'static,
+    {
+    */
+
+    // Start listening on privileged port(s) while we are root
+    let mut http_listener = TcpListener::bind(("0.0.0.0", port)).await.unwrap();
+    let mut https_listener = TcpListener::bind(("0.0.0.0", sport)).await.unwrap();
+
+    // Drop to non-root user
     if let Some(user) = user {
         privdrop::PrivDrop::default()
             // .chroot("/var/empty")
@@ -93,6 +104,57 @@ fn privdrop(user: Option<String>) {
             .apply()
             .unwrap();
     }
+
+    // Start accepting connections on those port(s)
+    let http_incoming = http_listener.incoming();
+    let https_incoming = https_listener.incoming();
+
+    let tls_accept = TlsAcceptor::from(Arc::new(get_tls_config(tls)));
+
+    let http_server = warp::serve(routes.clone()).run_incoming(http_incoming);
+    let https_server = {
+        let svc_https = warp::service(routes.clone());
+        let make_svc = hyper::service::make_service_fn(move |_| {
+            let svc = svc_https.clone();
+            async move { Ok::<_, Infallible>(svc) }
+        });
+        hyper::Server::builder(hyper::server::accept::from_stream(
+            https_incoming
+                .and_then(|s| tls_accept.accept(s))
+                .filter_map(|r| future::ready(r.ok().map(|s| Result::<_, Infallible>::Ok(s)))),
+        ))
+        .serve(make_svc)
+    };
+
+    // Run the server(s)
+    let (_, r2) = futures::future::join(http_server, https_server).await;
+    if r2.is_err() {
+        // https_server returns a Result that must be checked
+        warn!("Error with https server");
+    }
+}
+
+fn get_tls_config(dir: Option<String>) -> ServerConfig {
+    let mut config = ServerConfig::new(NoClientAuth::new());
+
+    if let Some(dir) = dir {
+        let cert_path = &Path::new(dir.as_str()).join("fullchain.pem");
+        let key_path = &Path::new(dir.as_str()).join("privkey.pem");
+
+        let certs = certs(&mut BufReader::new(File::open(cert_path).unwrap()))
+            .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "invalid cert"))
+            .unwrap();
+        let mut keys = pkcs8_private_keys(&mut BufReader::new(File::open(key_path).unwrap()))
+            .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "invalid key"))
+            .unwrap();
+
+        config
+            .set_single_cert(certs, keys.remove(0))
+            .map_err(|err| io::Error::new(io::ErrorKind::InvalidInput, err))
+            .unwrap();
+    }
+
+    config
 }
 
 fn spawn_summary(locked_stats: GlobalStats) {

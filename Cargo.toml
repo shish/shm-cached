@@ -20,6 +20,8 @@ futures = "*"
 log = "*"
 privdrop = "*"
 gethostname = "*"
+tokio-rustls = "*"
+hyper = "*"
 
 [build-dependencies]
 vergen = "3"

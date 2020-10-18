@@ -70,11 +70,11 @@ pub struct Args {
     pub name: Option<String>,
 
     /// HTTP Port
-    #[structopt(short = "p", default_value = "8050")]
+    #[structopt(short = "p", default_value = "8080")]
     pub port: u16,
 
     /// HTTPS Port
-    #[structopt(short = "s", default_value = "8051")]
+    #[structopt(short = "s", default_value = "8443")]
     pub sport: u16,
 
     /// Show version
