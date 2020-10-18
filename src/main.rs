@@ -76,7 +76,7 @@ async fn main() {
 
     let routes = stats_path.or(cache_path);
 
-    if args.user.is_none() {
+    if args.flag == false {
         let http = warp::serve(routes.clone()).run(([0, 0, 0, 0], args.port));
         if let Some(tls) = args.tls {
             let https = warp::serve(routes)
