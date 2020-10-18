@@ -76,67 +76,68 @@ async fn main() {
 
     let routes = stats_path.or(cache_path);
 
-    let http = warp::serve(routes.clone()).run(([0, 0, 0, 0], args.port));
-    if let Some(tls) = args.tls {
-        let https = warp::serve(routes)
-            .tls()
-            .cert_path(format!("{}/fullchain.pem", tls))
-            .key_path(format!("{}/privkey.pem", tls))
-            .run(([0, 0, 0, 0], args.sport));
-        futures::future::join(http, https).await;
+    if args.user.is_none() {
+        let http = warp::serve(routes.clone()).run(([0, 0, 0, 0], args.port));
+        if let Some(tls) = args.tls {
+            let https = warp::serve(routes)
+                .tls()
+                .cert_path(format!("{}/fullchain.pem", tls))
+                .key_path(format!("{}/privkey.pem", tls))
+                .run(([0, 0, 0, 0], args.sport));
+            futures::future::join(http, https).await;
+        } else {
+            http.await;
+        }
     } else {
-        http.await;
+        // I really want these to be parameters to a separate function, but
+        // when I put this in a separate function it throws a bunch of errors
+        let port = args.port;
+        let sport = args.sport;
+        let tls = args.tls;
+        let user = args.user;
+
+        // Start listening on privileged port(s) while we are root
+        let mut http_listener = TcpListener::bind(("0.0.0.0", port)).await.unwrap();
+        let mut https_listener = TcpListener::bind(("0.0.0.0", sport)).await.unwrap();
+
+        // System's TLS certs might also be root-only
+        let tls_accept = TlsAcceptor::from(Arc::new(get_tls_config(tls)));
+
+        // Drop to non-root user
+        if let Some(user) = user {
+            privdrop::PrivDrop::default()
+                // .chroot("/var/empty")
+                .user(user)
+                .apply()
+                .unwrap();
+        }
+
+        // Start accepting connections on those port(s)
+        let http_incoming = http_listener.incoming();
+        let https_incoming = https_listener.incoming();
+
+        let http_server = warp::serve(routes.clone()).run_incoming(http_incoming);
+        let https_server = {
+            let svc_https = warp::service(routes.clone());
+            let make_svc = hyper::service::make_service_fn(move |_| {
+                let svc = svc_https.clone();
+                async move { Ok::<_, Infallible>(svc) }
+            });
+            hyper::Server::builder(hyper::server::accept::from_stream(
+                https_incoming
+                    .and_then(|s| tls_accept.accept(s))
+                    .filter_map(|r| future::ready(r.ok().map(|s| Result::<_, Infallible>::Ok(s)))),
+            ))
+            .serve(make_svc)
+        };
+
+        // Run the server(s)
+        let (_, r2) = futures::future::join(http_server, https_server).await;
+        if r2.is_err() {
+            // https_server returns a Result that must be checked
+            warn!("Error with https server");
+        }
     }
-    /*
-    // I really want these to be parameters to a separate function, but
-    // when I put this in a separate function it throws a bunch of errors
-    let port = args.port;
-    let sport = args.sport;
-    let tls = args.tls;
-    let user = args.user;
-
-    // Start listening on privileged port(s) while we are root
-    let mut http_listener = TcpListener::bind(("0.0.0.0", port)).await.unwrap();
-    let mut https_listener = TcpListener::bind(("0.0.0.0", sport)).await.unwrap();
-
-    // System's TLS certs might also be root-only
-    let tls_accept = TlsAcceptor::from(Arc::new(get_tls_config(tls)));
-
-    // Drop to non-root user
-    if let Some(user) = user {
-        privdrop::PrivDrop::default()
-            // .chroot("/var/empty")
-            .user(user)
-            .apply()
-            .unwrap();
-    }
-
-    // Start accepting connections on those port(s)
-    let http_incoming = http_listener.incoming();
-    let https_incoming = https_listener.incoming();
-
-    let http_server = warp::serve(routes.clone()).run_incoming(http_incoming);
-    let https_server = {
-        let svc_https = warp::service(routes.clone());
-        let make_svc = hyper::service::make_service_fn(move |_| {
-            let svc = svc_https.clone();
-            async move { Ok::<_, Infallible>(svc) }
-        });
-        hyper::Server::builder(hyper::server::accept::from_stream(
-            https_incoming
-                .and_then(|s| tls_accept.accept(s))
-                .filter_map(|r| future::ready(r.ok().map(|s| Result::<_, Infallible>::Ok(s)))),
-        ))
-        .serve(make_svc)
-    };
-
-    // Run the server(s)
-    let (_, r2) = futures::future::join(http_server, https_server).await;
-    if r2.is_err() {
-        // https_server returns a Result that must be checked
-        warn!("Error with https server");
-    }
-    */
 }
 
 fn get_tls_config(dir: Option<String>) -> ServerConfig {
