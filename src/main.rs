@@ -96,6 +96,9 @@ async fn main() {
     let mut http_listener = TcpListener::bind(("0.0.0.0", port)).await.unwrap();
     let mut https_listener = TcpListener::bind(("0.0.0.0", sport)).await.unwrap();
 
+    // System's TLS certs might also be root-only
+    let tls_accept = TlsAcceptor::from(Arc::new(get_tls_config(tls)));
+
     // Drop to non-root user
     if let Some(user) = user {
         privdrop::PrivDrop::default()
@@ -108,8 +111,6 @@ async fn main() {
     // Start accepting connections on those port(s)
     let http_incoming = http_listener.incoming();
     let https_incoming = https_listener.incoming();
-
-    let tls_accept = TlsAcceptor::from(Arc::new(get_tls_config(tls)));
 
     let http_server = warp::serve(routes.clone()).run_incoming(http_incoming);
     let https_server = {
