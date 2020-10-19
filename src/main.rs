@@ -76,30 +76,30 @@ async fn main() {
 
     let routes = stats_path.or(cache_path);
 
+    // I really want these to be parameters to a separate function, but
+    // when I put this in a separate function it throws a bunch of errors
+    let addr: std::net::IpAddr = args.address.parse().unwrap();
+    let http_addr = (addr, args.port);
+    let https_addr = (addr, args.sport);
+    let tls = args.tls;
+    let user = args.user;
+
     if args.flag == false {
-        let http = warp::serve(routes.clone()).run(([0, 0, 0, 0], args.port));
-        if let Some(tls) = args.tls {
+        let http = warp::serve(routes.clone()).run(http_addr);
+        if let Some(tls) = tls {
             let https = warp::serve(routes)
                 .tls()
                 .cert_path(format!("{}/fullchain.pem", tls))
                 .key_path(format!("{}/privkey.pem", tls))
-                .run(([0, 0, 0, 0], args.sport));
+                .run(https_addr);
             futures::future::join(http, https).await;
         } else {
             http.await;
         }
     } else {
-        // I really want these to be parameters to a separate function, but
-        // when I put this in a separate function it throws a bunch of errors
-        let addr = args.address.as_str();
-        let port = args.port;
-        let sport = args.sport;
-        let tls = args.tls;
-        let user = args.user;
-
         // Start listening on privileged port(s) while we are root
-        let mut http_listener = TcpListener::bind((addr, port)).await.unwrap();
-        let mut https_listener = TcpListener::bind((addr, sport)).await.unwrap();
+        let mut http_listener = TcpListener::bind(http_addr).await.unwrap();
+        let mut https_listener = TcpListener::bind(https_addr).await.unwrap();
 
         // System's TLS certs might also be root-only
         let tls_accept = TlsAcceptor::from(Arc::new(get_tls_config(tls)));
