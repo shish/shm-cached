@@ -58,7 +58,7 @@ async fn main() {
         locked_stats.clone(),
     )
     .await;
-    spawn_summary(locked_stats.clone());
+    spawn_summary(name.clone(), locked_stats.clone());
 
     // GET /stats -> show stats
     let locked_stats2 = locked_stats.clone();
@@ -164,7 +164,7 @@ fn get_tls_config(dir: Option<String>) -> ServerConfig {
     config
 }
 
-fn spawn_summary(locked_stats: GlobalStats) {
+fn spawn_summary(name: String, locked_stats: GlobalStats) {
     tokio::spawn(async move {
         let mut last_hit = 0;
         let mut last_miss = 0;
@@ -179,7 +179,7 @@ fn spawn_summary(locked_stats: GlobalStats) {
                 } else {
                     last_hitrate
                 };
-                let msg = format!("shm_cached {},hitrate={}", stats.to_string(), hitrate);
+                let msg = format!("shm_cached,name={} {},hitrate={}", name, stats.to_string(), hitrate);
                 debug!("{}", msg);
                 {
                     let socket = std::net::UdpSocket::bind("127.0.0.1:0")
