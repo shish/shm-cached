@@ -259,8 +259,6 @@ async fn handle_request_inner(
         match silos.get(&silo) {
             Some(s) => s.lookup_list(&hash, 2),
             None => {
-                let mut stats = locked_stats.write().await;
-                stats.invalid += 1;
                 return Err(warp::reject::not_found());
             }
         }

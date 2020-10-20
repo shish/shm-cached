@@ -10,8 +10,8 @@ pub struct Stats {
     pub hits: usize,
     pub misses: usize,
     pub redirect: usize,
-    pub invalid: usize,
     pub missing: usize,
+
     pub inflight: usize,
     pub block_disk: usize,
     pub block_net: usize,
@@ -25,13 +25,12 @@ impl std::fmt::Display for Stats {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "requests={},hits={},misses={},redirect={},invalid={},missing={},\
+            "requests={},hits={},misses={},redirect={},missing={},\
             inflight={},block_net={},block_disk={}",
             self.requests,
             self.hits,
             self.misses,
             self.redirect,
-            self.invalid,
             self.missing,
             self.inflight,
             self.block_disk,
