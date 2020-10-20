@@ -4,9 +4,11 @@ use futures::channel::mpsc;
 use futures::FutureExt;
 use futures::{future, stream, StreamExt};
 use std::path::Path;
+use std::sync::Arc;
+use tokio::sync::RwLock;
 use tokio_postgres::{AsyncMessage, NoTls};
 
-use crate::types::{GlobalSilos, GlobalStats};
+use crate::types::{GlobalSilos, GlobalStats, Stats};
 
 // Backported from nightly #![feature(poll_map)]
 // https://github.com/rust-lang/rust/pull/63512/files
@@ -40,6 +42,18 @@ pub async fn spawn_db_listener(
     populate_silo(&locked_silos, &client, "_thumbs", "image_tlink").await;
     populate_silo(&locked_silos, &client, "_images", "image_ilink").await;
 
+    {
+        let mut stats = locked_stats.write().await;
+        stats.insert(
+            "_thumbs".to_string(),
+            Arc::new(RwLock::new(Stats::default())),
+        );
+        stats.insert(
+            "_images".to_string(),
+            Arc::new(RwLock::new(Stats::default())),
+        );
+    }
+
     client.query("LISTEN shm_image_bans", &[]).await.unwrap();
     let existing_bans = client
         .query(
@@ -62,10 +76,6 @@ pub async fn spawn_db_listener(
                     populate_silo(&locked_silos, &client, "_images", "image_ilink").await;
                 }
                 if notification.channel() == "shm_image_bans" {
-                    {
-                        let mut stats = locked_stats.write().await;
-                        stats.purged += 1;
-                    }
                     clean(&cache, &locked_silos, notification.payload()).await;
                 }
             }

@@ -12,11 +12,13 @@ pub struct Stats {
     pub redirect: usize,
     pub invalid: usize,
     pub missing: usize,
-    pub purged: usize,
-    pub cleaned: usize,
     pub inflight: usize,
     pub block_disk: usize,
     pub block_net: usize,
+
+    pub last_hit: usize,
+    pub last_miss: usize,
+    pub last_hitrate: usize,
 }
 
 impl std::fmt::Display for Stats {
@@ -24,23 +26,19 @@ impl std::fmt::Display for Stats {
         write!(
             f,
             "requests={},hits={},misses={},redirect={},invalid={},missing={},\
-            purged={},cleaned={},inflight={},block_net={},block_disk={}",
+            inflight={},block_net={},block_disk={}",
             self.requests,
             self.hits,
             self.misses,
             self.redirect,
             self.invalid,
             self.missing,
-            self.purged,
-            self.cleaned,
             self.inflight,
             self.block_disk,
             self.block_net,
         )
     }
 }
-
-pub type GlobalStats = Arc<RwLock<Stats>>;
 
 #[derive(StructOpt, Clone)]
 #[structopt(about = "HTTP cache optimised for Shimmie galleries")]
@@ -92,3 +90,4 @@ pub struct Args {
 
 pub type GlobalArgs = Arc<RwLock<Args>>;
 pub type GlobalSilos = Arc<RwLock<HashMap<String, Flexihash>>>;
+pub type GlobalStats = Arc<RwLock<HashMap<String, Arc<RwLock<Stats>>>>>;

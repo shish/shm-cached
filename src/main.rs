@@ -60,12 +60,6 @@ async fn main() {
     .await;
     spawn_summary(name.clone(), locked_stats.clone());
 
-    // GET /stats -> show stats
-    let locked_stats2 = locked_stats.clone();
-    let stats_path = warp::path("stats")
-        .and(warp::any().map(move || locked_stats2.clone()))
-        .and_then(show_stats);
-
     // GET /<silo>/<hash>/<room> -> fetch from cache
     let cache_path = warp::path!(String / String / String)
         .and(warp::any().map(move || locked_args.clone()))
@@ -74,7 +68,7 @@ async fn main() {
         .and(warp::any().map(move || name.clone()))
         .and_then(handle_request);
 
-    let routes = stats_path.or(cache_path);
+    let routes = cache_path;
 
     // I really want these to be parameters to a separate function, but
     // when I put this in a separate function it throws a bunch of errors
@@ -164,44 +158,39 @@ fn get_tls_config(dir: Option<String>) -> ServerConfig {
     config
 }
 
-fn spawn_summary(name: String, locked_stats: GlobalStats) {
+fn spawn_summary(name: String, locked_global_stats: GlobalStats) {
     tokio::spawn(async move {
-        let mut last_hit = 0;
-        let mut last_miss = 0;
-        let mut last_hitrate = 0;
+        let socket = std::net::UdpSocket::bind("127.0.0.1:0").expect("failed to bind stats socket");
         loop {
             {
-                let stats = locked_stats.read().await;
-
-                let total = stats.hits - last_hit + stats.misses - last_miss;
-                let hitrate = if total > 0 {
-                    (stats.hits - last_hit) * 100 / total
-                } else {
-                    last_hitrate
-                };
-                let msg = format!("shm_cached,name={} {},hitrate={}", name, stats.to_string(), hitrate);
-                debug!("{}", msg);
-                {
-                    let socket = std::net::UdpSocket::bind("127.0.0.1:0")
-                        .expect("failed to bind host socket");
+                for (silo, locked_stats) in locked_global_stats.read().await.iter() {
+                    let mut stats = locked_stats.write().await;
+                    let total = stats.hits - stats.last_hit + stats.misses - stats.last_miss;
+                    let hitrate = if total > 0 {
+                        (stats.hits - stats.last_hit) * 100 / total
+                    } else {
+                        stats.last_hitrate
+                    };
+                    let msg = format!(
+                        "shm_cached,name={},silo={} {},hitrate={}",
+                        name,
+                        silo,
+                        stats.to_string(),
+                        hitrate
+                    );
+                    debug!("{}", msg);
                     socket
                         .send_to(msg.as_bytes(), "127.0.0.1:8094")
                         .expect("failed to send message");
-                }
 
-                last_hit = stats.hits;
-                last_miss = stats.misses;
-                last_hitrate = hitrate;
+                    stats.last_hit = stats.hits;
+                    stats.last_miss = stats.misses;
+                    stats.last_hitrate = hitrate;
+                }
             }
             tokio::time::delay_for(Duration::from_secs(10)).await;
         }
     });
-}
-
-async fn show_stats(locked_stats: GlobalStats) -> Result<impl warp::reply::Reply, warp::Rejection> {
-    let stats = locked_stats.read().await;
-    // Ok(warp::reply::json(stats))
-    Ok(stats.to_string())
 }
 
 async fn handle_request(
@@ -209,10 +198,18 @@ async fn handle_request(
     hash: String,
     human: String,
     locked_args: GlobalArgs,
-    locked_stats: GlobalStats,
+    locked_global_stats: GlobalStats,
     locked_silos: GlobalSilos,
     me: String,
 ) -> Result<Box<dyn warp::Reply>, warp::Rejection> {
+    let global_stats = locked_global_stats.read().await;
+    let locked_stats = match global_stats.get(&silo) {
+        Some(s) => s,
+        None => {
+            return Err(warp::reject::not_found());
+        }
+    };
+
     {
         let mut stats = locked_stats.write().await;
         stats.inflight += 1;
@@ -239,7 +236,7 @@ async fn handle_request_inner(
     hash: String,
     human: String,
     locked_args: GlobalArgs,
-    locked_stats: GlobalStats,
+    locked_stats: Arc<RwLock<Stats>>,
     locked_silos: GlobalSilos,
     me: String,
 ) -> Result<Box<dyn warp::Reply>, warp::Rejection> {
