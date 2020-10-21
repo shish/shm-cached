@@ -61,6 +61,8 @@ async fn main() {
     .await;
     spawn_summary(name.clone(), locked_stats.clone());
 
+    let robots = warp::path!("robots.txt").map(|| "User-agent: *\nDisallow: /_thumbs/\nAllow: /\n");
+
     let certbot = warp::path!(".well-known" / "acme-challenge" / String).and_then(handle_acme);
 
     // GET /<silo>/<hash>/<room> -> fetch from cache
@@ -72,7 +74,7 @@ async fn main() {
         .and(warp::header::optional::<String>("referer"))
         .and_then(handle_request);
 
-    let routes = certbot.or(cache_path);
+    let routes = robots.or(certbot).or(cache_path);
 
     // I really want these to be parameters to a separate function, but
     // when I put this in a separate function it throws a bunch of errors
