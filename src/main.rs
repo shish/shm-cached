@@ -61,6 +61,8 @@ async fn main() {
     .await;
     spawn_summary(name.clone(), locked_stats.clone());
 
+    let certbot = warp::path!(".well-known" / "acme-challenge" / String).and_then(handle_acme);
+
     // GET /<silo>/<hash>/<room> -> fetch from cache
     let cache_path = warp::path!(String / String / String)
         .and(warp::any().map(move || locked_args.clone()))
@@ -70,7 +72,7 @@ async fn main() {
         .and(warp::header::optional::<String>("referer"))
         .and_then(handle_request);
 
-    let routes = cache_path;
+    let routes = certbot.or(cache_path);
 
     // I really want these to be parameters to a separate function, but
     // when I put this in a separate function it throws a bunch of errors
@@ -193,6 +195,14 @@ fn spawn_summary(name: String, locked_global_stats: GlobalStats) {
             tokio::time::delay_for(Duration::from_secs(10)).await;
         }
     });
+}
+
+async fn handle_acme(file: String) -> Result<Box<dyn warp::Reply>, warp::Rejection> {
+    let certbot = format!("http://localhost:888/.well-known/acme-challenge/{}", file);
+    let res = reqwest::get(certbot.as_str()).await.unwrap();
+    let body = res.bytes().await.unwrap();
+    info!("Acme-challenge: {}", file);
+    return Ok(Box::new(Response::builder().status(200).body(body)));
 }
 
 async fn handle_request(
