@@ -260,7 +260,7 @@ async fn handle_request_inner(
     };
 
     if let Some(referer) = referer {
-        if referer.contains("google") {
+        if silo == "_images" && referer.contains("google") {
             let target = format!("https://holly.paheal.net/_thumbs/{}/thumb.jpg", hash)
                 .parse::<Uri>()
                 .unwrap();
