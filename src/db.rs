@@ -26,6 +26,7 @@ where
 
 pub async fn spawn_db_listener(
     dsn: String,
+    name: String,
     cache: String,
     locked_silos: GlobalSilos,
     locked_stats: GlobalStats,
@@ -37,6 +38,8 @@ pub async fn spawn_db_listener(
     let stream = stream::poll_fn(move |cx| map_err(connection.poll_message(cx), |e| panic!(e)));
     let c = stream.forward(tx).map(|r| r.unwrap());
     tokio::spawn(c);
+
+    client.query(format!("SET application_name TO 'shm-cached [{}]'", name).as_str(), &[]).await.unwrap();
 
     client.query("LISTEN config", &[]).await.unwrap();
     populate_silo(&locked_silos, &client, "_thumbs", "image_tlink").await;

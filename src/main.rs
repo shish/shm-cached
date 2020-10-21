@@ -53,6 +53,7 @@ async fn main() {
 
     spawn_db_listener(
         dsn.clone(),
+        name.clone(),
         args.cache,
         locked_silos.clone(),
         locked_stats.clone(),
