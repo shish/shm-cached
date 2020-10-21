@@ -67,6 +67,7 @@ async fn main() {
         .and(warp::any().map(move || locked_stats.clone()))
         .and(warp::any().map(move || locked_silos.clone()))
         .and(warp::any().map(move || name.clone()))
+        .and(warp::header::optional::<String>("referer"))
         .and_then(handle_request);
 
     let routes = cache_path;
@@ -202,6 +203,7 @@ async fn handle_request(
     locked_global_stats: GlobalStats,
     locked_silos: GlobalSilos,
     me: String,
+    referer: Option<String>,
 ) -> Result<Box<dyn warp::Reply>, warp::Rejection> {
     let global_stats = locked_global_stats.read().await;
     let locked_stats = match global_stats.get(&silo) {
@@ -223,6 +225,7 @@ async fn handle_request(
         locked_stats.clone(),
         locked_silos,
         me,
+        referer,
     )
     .await;
     {
@@ -240,6 +243,7 @@ async fn handle_request_inner(
     locked_stats: Arc<RwLock<Stats>>,
     locked_silos: GlobalSilos,
     me: String,
+    referer: Option<String>,
 ) -> Result<Box<dyn warp::Reply>, warp::Rejection> {
     {
         let mut stats = locked_stats.write().await;
@@ -254,6 +258,18 @@ async fn handle_request_inner(
         "webp" => "image/webp",
         _ => "image/jpeg",
     };
+
+    if let Some(referer) = referer {
+        if referer.contains("google") {
+            let target = format!("https://holly.paheal.net/_thumbs/{}/thumb.jpg", hash)
+                .parse::<Uri>()
+                .unwrap();
+
+            let mut stats = locked_stats.write().await;
+            stats.unleech += 1;
+            return Ok(Box::new(warp::redirect::temporary(target)));
+        }
+    }
 
     let owners = {
         let silos = locked_silos.read().await;

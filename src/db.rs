@@ -39,7 +39,13 @@ pub async fn spawn_db_listener(
     let c = stream.forward(tx).map(|r| r.unwrap());
     tokio::spawn(c);
 
-    client.query(format!("SET application_name TO 'shm-cached [{}]'", name).as_str(), &[]).await.unwrap();
+    client
+        .query(
+            format!("SET application_name TO 'shm-cached [{}]'", name).as_str(),
+            &[],
+        )
+        .await
+        .unwrap();
 
     client.query("LISTEN config", &[]).await.unwrap();
     populate_silo(&locked_silos, &client, "_thumbs", "image_tlink").await;

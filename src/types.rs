@@ -11,6 +11,7 @@ pub struct Stats {
     pub misses: usize,
     pub redirect: usize,
     pub missing: usize,
+    pub unleech: usize,
 
     pub inflight: usize,
     pub block_disk: usize,
@@ -26,12 +27,13 @@ impl std::fmt::Display for Stats {
         write!(
             f,
             "requests={},hits={},misses={},redirect={},missing={},\
-            inflight={},block_net={},block_disk={}",
+            unleech={},inflight={},block_net={},block_disk={}",
             self.requests,
             self.hits,
             self.misses,
             self.redirect,
             self.missing,
+            self.unleech,
             self.inflight,
             self.block_disk,
             self.block_net,
