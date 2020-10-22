@@ -61,8 +61,10 @@ async fn main() {
     .await;
     spawn_summary(name.clone(), locked_stats.clone());
 
+    // GET /robots.txt -> hard-coding which silos shouldn't be crawled
     let robots = warp::path!("robots.txt").map(|| "User-agent: *\nDisallow: /_thumbs/\nAllow: /\n");
 
+    // GET /.well-known/acme-challenge/* -> Let's Encrypt challenge responses
     let certbot = warp::path!(".well-known" / "acme-challenge" / String).and_then(handle_acme);
 
     // GET /<silo>/<hash>/<room> -> fetch from cache
