@@ -288,7 +288,7 @@ async fn handle_request_inner(
             stats.unleech += 1;
             return Ok(Box::new(warp::redirect::temporary(target)));
         }
-        if silo == "_images" && !referer.contains("rule34.paheal.net") {
+        if silo == "_images" && !referer.contains("paheal.net") {
             debug!("External referrer: {}", referer);
         }
     }
