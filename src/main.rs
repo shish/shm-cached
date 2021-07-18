@@ -274,7 +274,12 @@ async fn handle_request_inner(
     };
 
     if let Some(referer) = referer {
-        if silo == "_images" && referer.contains("google") {
+        if silo == "_images" && (
+            referer.contains("google") ||
+            referer.contains("//www.bing.com/") ||
+            referer.contains("//www.gay-fetish-xxx.com/") ||
+            referer.contains("//www.sexpicturespass.com/")
+        ) {
             let target = format!("https://holly.paheal.net/_thumbs/{}/thumb.jpg", hash)
                 .parse::<Uri>()
                 .unwrap();
@@ -282,6 +287,9 @@ async fn handle_request_inner(
             let mut stats = locked_stats.write().await;
             stats.unleech += 1;
             return Ok(Box::new(warp::redirect::temporary(target)));
+        }
+        if silo == "_images" && !referer.contains("rule34.paheal.net") {
+            debug!("External referrer: {}", referer);
         }
     }
 
