@@ -35,7 +35,7 @@ pub async fn spawn_db_listener(
 
     let (tx, mut rx) = mpsc::unbounded();
     // let stream = stream::poll_fn(move |cx| connection.poll_message(cx).map_err(|e| panic!(e)));
-    let stream = stream::poll_fn(move |cx| map_err(connection.poll_message(cx), |e| panic!(e)));
+    let stream = stream::poll_fn(move |cx| map_err(connection.poll_message(cx), |e| panic!("{}", e)));
     let c = stream.forward(tx).map(|r| r.unwrap());
     tokio::spawn(c);
 
