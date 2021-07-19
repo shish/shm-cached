@@ -273,24 +273,22 @@ async fn handle_request_inner(
         _ => "image/jpeg",
     };
 
-    if let Some(referer) = referer {
-        if silo == "_images" && (
-            referer.contains("google") ||
-            referer.contains("//www.bing.com/") ||
-            referer.contains("//images.search.yahoo.com/") ||
-            referer.contains("//www.gay-fetish-xxx.com/") ||
-            referer.contains("//www.sexpicturespass.com/")
-        ) {
-            let target = format!("https://holly.paheal.net/_thumbs/{}/thumb.jpg", hash)
-                .parse::<Uri>()
-                .unwrap();
-
-            let mut stats = locked_stats.write().await;
-            stats.unleech += 1;
-            return Ok(Box::new(warp::redirect::temporary(target)));
-        }
-        if silo == "_images" && !referer.contains("paheal.net") {
-            debug!("External referrer: {}", referer);
+    if silo == "_images" {
+        let mut stats = locked_stats.write().await;
+        if let Some(referer) = referer {
+            if referer.contains("paheal.net") {
+                stats.paheal += 1;
+            } else if referer.contains("google") {
+                stats.google += 1;
+                let target = format!("https://holly.paheal.net/_thumbs/{}/thumb.jpg", hash)
+                    .parse::<Uri>()
+                    .unwrap();
+                return Ok(Box::new(warp::redirect::temporary(target)));
+            } else {
+                stats.external += 1;
+            }
+        } else {
+            stats.norefer += 1;
         }
     }
 
