@@ -277,6 +277,7 @@ async fn handle_request_inner(
         if silo == "_images" && (
             referer.contains("google") ||
             referer.contains("//www.bing.com/") ||
+            referer.contains("//images.search.yahoo.com/") ||
             referer.contains("//www.gay-fetish-xxx.com/") ||
             referer.contains("//www.sexpicturespass.com/")
         ) {
