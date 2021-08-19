@@ -1,4 +1,3 @@
-use core::task::Poll;
 use flexihash::Flexihash;
 use futures::channel::mpsc;
 use futures::FutureExt;
@@ -10,20 +9,6 @@ use tokio_postgres::{AsyncMessage, NoTls};
 
 use crate::types::{GlobalSilos, GlobalStats, Stats};
 
-// Backported from nightly #![feature(poll_map)]
-// https://github.com/rust-lang/rust/pull/63512/files
-pub fn map_err<U, F, T, E>(s: Poll<Option<Result<T, E>>>, f: F) -> Poll<Option<Result<T, U>>>
-where
-    F: FnOnce(E) -> U,
-{
-    match s {
-        Poll::Ready(Some(Ok(t))) => Poll::Ready(Some(Ok(t))),
-        Poll::Ready(Some(Err(e))) => Poll::Ready(Some(Err(f(e)))),
-        Poll::Ready(None) => Poll::Ready(None),
-        Poll::Pending => Poll::Pending,
-    }
-}
-
 pub async fn spawn_db_listener(
     dsn: String,
     name: String,
@@ -34,8 +19,7 @@ pub async fn spawn_db_listener(
     let (client, mut connection) = tokio_postgres::connect(dsn.as_str(), NoTls).await.unwrap();
 
     let (tx, mut rx) = mpsc::unbounded();
-    // let stream = stream::poll_fn(move |cx| connection.poll_message(cx).map_err(|e| panic!(e)));
-    let stream = stream::poll_fn(move |cx| map_err(connection.poll_message(cx), |e| panic!("{}", e)));
+    let stream = stream::poll_fn(move |cx| connection.poll_message(cx).map_err(|e| panic!("{}", e)));
     let c = stream.forward(tx).map(|r| r.unwrap());
     tokio::spawn(c);
 
