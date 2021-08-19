@@ -91,10 +91,6 @@ pub struct Args {
     /// Show version
     #[structopt(long = "version")]
     pub version: bool,
-
-    /// Show version
-    #[structopt(short = "f")]
-    pub flag: bool,
 }
 
 pub type GlobalArgs = Arc<RwLock<Args>>;

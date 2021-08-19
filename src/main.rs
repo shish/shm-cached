@@ -1,18 +1,10 @@
-use futures::{future, StreamExt, TryStreamExt};
 use std::collections::HashMap;
-use std::convert::Infallible;
-use std::fs::File;
-use std::io::{self, BufReader};
 use std::path::Path;
 use std::sync::Arc;
 use std::time::{Duration, UNIX_EPOCH};
 use structopt::StructOpt;
 use tokio::fs;
-use tokio::net::TcpListener;
 use tokio::sync::RwLock;
-use tokio_rustls::rustls::internal::pemfile::{certs, pkcs8_private_keys};
-use tokio_rustls::rustls::{NoClientAuth, ServerConfig};
-use tokio_rustls::TlsAcceptor;
 use warp::{http::Response, http::Uri, Filter};
 mod db;
 mod types;
@@ -86,84 +78,29 @@ async fn main() {
     let tls = args.tls;
     let user = args.user;
 
-    if args.flag == false {
-        let http = warp::serve(routes.clone()).run(http_addr);
-        if let Some(tls) = tls {
-            let https = warp::serve(routes)
-                .tls()
-                .cert_path(format!("{}/fullchain.pem", tls))
-                .key_path(format!("{}/privkey.pem", tls))
-                .run(https_addr);
-            futures::future::join(http, https).await;
-        } else {
-            http.await;
-        }
+    let http = warp::serve(routes.clone()).run(http_addr);
+    if let Some(tls) = tls {
+        let https = warp::serve(routes)
+            .tls()
+            .cert_path(format!("{}/fullchain.pem", tls))
+            .key_path(format!("{}/privkey.pem", tls))
+            .run(https_addr);
+        drop_privs(user);
+        futures::future::join(http, https).await;
     } else {
-        // Start listening on privileged port(s) while we are root
-        let mut http_listener = TcpListener::bind(http_addr).await.unwrap();
-        let mut https_listener = TcpListener::bind(https_addr).await.unwrap();
-
-        // System's TLS certs might also be root-only
-        let tls_accept = TlsAcceptor::from(Arc::new(get_tls_config(tls)));
-
-        // Drop to non-root user
-        if let Some(user) = user {
-            privdrop::PrivDrop::default()
-                // .chroot("/var/empty")
-                .user(user)
-                .apply()
-                .unwrap();
-        }
-
-        // Start accepting connections on those port(s)
-        let http_incoming = http_listener.incoming();
-        let https_incoming = https_listener.incoming();
-
-        let http_server = warp::serve(routes.clone()).run_incoming(http_incoming);
-        let https_server = {
-            let svc_https = warp::service(routes.clone());
-            let make_svc = hyper::service::make_service_fn(move |_| {
-                let svc = svc_https.clone();
-                async move { Ok::<_, Infallible>(svc) }
-            });
-            hyper::Server::builder(hyper::server::accept::from_stream(
-                https_incoming
-                    .and_then(|s| tls_accept.accept(s))
-                    .filter_map(|r| future::ready(r.ok().map(|s| Result::<_, Infallible>::Ok(s)))),
-            ))
-            .serve(make_svc)
-        };
-
-        // Run the server(s)
-        let (_, r2) = futures::future::join(http_server, https_server).await;
-        if r2.is_err() {
-            // https_server returns a Result that must be checked
-            warn!("Error with https server");
-        }
+        drop_privs(user);
+        http.await;
     }
 }
 
-fn get_tls_config(dir: Option<String>) -> ServerConfig {
-    let mut config = ServerConfig::new(NoClientAuth::new());
-
-    if let Some(dir) = dir {
-        let cert_path = &Path::new(dir.as_str()).join("fullchain.pem");
-        let key_path = &Path::new(dir.as_str()).join("privkey.pem");
-
-        let certs = certs(&mut BufReader::new(File::open(cert_path).unwrap()))
-            .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "invalid cert"))
-            .unwrap();
-        let mut keys = pkcs8_private_keys(&mut BufReader::new(File::open(key_path).unwrap()))
-            .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "invalid key"))
-            .unwrap();
-
-        config
-            .set_single_cert(certs, keys.remove(0))
-            .map_err(|err| io::Error::new(io::ErrorKind::InvalidInput, err))
+fn drop_privs(user: Option<String>) {
+    if let Some(user) = user {
+        privdrop::PrivDrop::default()
+            // .chroot("/var/empty")
+            .user(user)
+            .apply()
             .unwrap();
     }
-
-    config
 }
 
 fn spawn_summary(name: String, locked_global_stats: GlobalStats) {
