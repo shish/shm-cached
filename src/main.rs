@@ -1,12 +1,13 @@
 use std::collections::HashMap;
+use std::error::Error;
 use std::path::Path;
 use std::sync::Arc;
 use std::time::{Duration, UNIX_EPOCH};
 use structopt::StructOpt;
 use tokio::fs;
 use tokio::sync::RwLock;
-use warp::{http::Response, http::Uri, Filter};
 use warp::hyper::Client;
+use warp::{http::Response, http::Uri, Filter};
 mod db;
 mod types;
 
@@ -17,7 +18,7 @@ use crate::db::spawn_db_listener;
 use crate::types::*;
 
 #[tokio::main]
-async fn main() {
+async fn main() -> Result<(), Box<dyn Error>> {
     let args = Args::from_args();
     let dsn = args.dsn.clone();
 
@@ -35,7 +36,7 @@ async fn main() {
         name,
     );
     if args.version {
-        return;
+        return Ok(());
     }
 
     let silos = HashMap::new();
@@ -51,7 +52,7 @@ async fn main() {
         locked_silos.clone(),
         locked_stats.clone(),
     )
-    .await;
+    .await?;
     spawn_summary(name.clone(), locked_stats.clone());
 
     // GET /robots.txt -> hard-coding which silos shouldn't be crawled
@@ -73,7 +74,7 @@ async fn main() {
 
     // I really want these to be parameters to a separate function, but
     // when I put this in a separate function it throws a bunch of errors
-    let addr: std::net::IpAddr = args.address.parse().unwrap();
+    let addr: std::net::IpAddr = args.address.parse()?;
     let http_addr = (addr, args.port);
     let https_addr = (addr, args.sport);
     let tls = args.tls;
@@ -86,23 +87,25 @@ async fn main() {
             .cert_path(format!("{}/fullchain.pem", tls))
             .key_path(format!("{}/privkey.pem", tls))
             .run(https_addr);
-        drop_privs(user);
+        drop_privs(user)?;
         futures::future::join(http, https).await;
     } else {
-        drop_privs(user);
+        drop_privs(user)?;
         http.await;
     }
+
+    Ok(())
 }
 
-fn drop_privs(user: Option<String>) {
+fn drop_privs(user: Option<String>) -> Result<(), privdrop::PrivDropError> {
     if let Some(user) = user {
         info!("Dropping from root to {}", user);
         privdrop::PrivDrop::default()
             // .chroot("/var/empty")
             .user(user)
-            .apply()
-            .unwrap();
+            .apply()?;
     }
+    Ok(())
 }
 
 fn spawn_summary(name: String, locked_global_stats: GlobalStats) {
@@ -145,7 +148,7 @@ async fn handle_acme(file: String) -> Result<Box<dyn warp::Reply>, warp::Rejecti
     let client = Client::new();
     let resp = client.get(certbot.parse().unwrap()).await.unwrap();
     info!("Acme-challenge: {}", file);
-    return Ok(Box::new(resp));
+    Ok(Box::new(resp))
 }
 
 async fn handle_request(
@@ -185,7 +188,7 @@ async fn handle_request(
         let mut stats = locked_stats.write().await;
         stats.inflight -= 1;
     }
-    return ret;
+    ret
 }
 
 async fn handle_request_inner(
@@ -202,7 +205,7 @@ async fn handle_request_inner(
         let mut stats = locked_stats.write().await;
         stats.requests += 1;
     }
-    let ext = human.rsplit(".").next().unwrap().as_ref();
+    let ext = human.rsplit('.').next().unwrap();
     let content_type = match ext {
         "mp4" => "video/mp4",
         "webm" => "video/webm",
@@ -319,7 +322,10 @@ async fn handle_request_inner(
         stats.block_net += 1;
     }
     let client = Client::new();
-    let res = client.get(url.to_str().unwrap().parse().unwrap()).await.unwrap();
+    let res = client
+        .get(url.to_str().unwrap().parse().unwrap())
+        .await
+        .unwrap();
     {
         let mut stats = locked_stats.write().await;
         stats.block_net -= 1;
@@ -350,12 +356,12 @@ async fn handle_request_inner(
 
     let mut stats = locked_stats.write().await;
     stats.misses += 1;
-    return Ok(Box::new(
+    Ok(Box::new(
         Response::builder()
             .status(200)
             .header("Content-Type", content_type)
             .header("Last-Modified", httpdate::fmt_http_date(mtime))
             .header("Cache-Control", "public, max-age=31556926")
             .body(body),
-    ));
+    ))
 }
