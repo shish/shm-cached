@@ -6,7 +6,6 @@ edition = "2018"
 build = "build.rs"
 
 [dependencies]
-# tokio = { version = "0.2", features = ["macros"] }
 flexihash = "*"
 tokio = { version = "0.2", features = ["full"] }
 tokio-postgres = "*"
@@ -15,7 +14,6 @@ pretty_env_logger = "*"
 structopt = "*"
 utime = "*"
 httpdate = "*"
-reqwest = "*"
 futures = "*"
 log = "*"
 privdrop = "*"

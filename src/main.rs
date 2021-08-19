@@ -6,6 +6,7 @@ use structopt::StructOpt;
 use tokio::fs;
 use tokio::sync::RwLock;
 use warp::{http::Response, http::Uri, Filter};
+use hyper::Client;
 mod db;
 mod types;
 
@@ -140,10 +141,10 @@ fn spawn_summary(name: String, locked_global_stats: GlobalStats) {
 
 async fn handle_acme(file: String) -> Result<Box<dyn warp::Reply>, warp::Rejection> {
     let certbot = format!("http://localhost:888/.well-known/acme-challenge/{}", file);
-    let res = reqwest::get(certbot.as_str()).await.unwrap();
-    let body = res.bytes().await.unwrap();
+    let client = Client::new();
+    let resp = client.get(certbot.parse().unwrap()).await.unwrap();
     info!("Acme-challenge: {}", file);
-    return Ok(Box::new(Response::builder().status(200).body(body)));
+    return Ok(Box::new(resp));
 }
 
 async fn handle_request(
@@ -316,13 +317,14 @@ async fn handle_request_inner(
         let mut stats = locked_stats.write().await;
         stats.block_net += 1;
     }
-    let res = reqwest::get(url.to_str().unwrap()).await.unwrap();
+    let client = Client::new();
+    let res = client.get(url.to_str().unwrap().parse().unwrap()).await.unwrap();
     {
         let mut stats = locked_stats.write().await;
         stats.block_net -= 1;
     }
 
-    if res.status() != reqwest::StatusCode::OK {
+    if res.status() != hyper::StatusCode::OK {
         let mut stats = locked_stats.write().await;
         stats.missing += 1;
         return Err(warp::reject::not_found());
@@ -331,7 +333,7 @@ async fn handle_request_inner(
     let headers = res.headers();
     let mtime =
         httpdate::parse_http_date(headers.get("last-modified").unwrap().to_str().unwrap()).unwrap();
-    let body = res.bytes().await.unwrap();
+    let body = hyper::body::to_bytes(res).await.unwrap();
 
     let body_to_write = body.clone();
     tokio::spawn(async move {
