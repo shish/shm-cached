@@ -96,6 +96,7 @@ async fn main() {
 
 fn drop_privs(user: Option<String>) {
     if let Some(user) = user {
+        info!("Dropping from root to {}", user);
         privdrop::PrivDrop::default()
             // .chroot("/var/empty")
             .user(user)
