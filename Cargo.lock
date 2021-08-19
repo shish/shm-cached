@@ -1403,7 +1403,6 @@ dependencies = [
  "futures",
  "gethostname",
  "httpdate",
- "hyper",
  "log",
  "pretty_env_logger",
  "privdrop",

@@ -6,7 +6,7 @@ use structopt::StructOpt;
 use tokio::fs;
 use tokio::sync::RwLock;
 use warp::{http::Response, http::Uri, Filter};
-use hyper::Client;
+use warp::hyper::Client;
 mod db;
 mod types;
 
@@ -324,7 +324,7 @@ async fn handle_request_inner(
         stats.block_net -= 1;
     }
 
-    if res.status() != hyper::StatusCode::OK {
+    if res.status() != warp::hyper::StatusCode::OK {
         let mut stats = locked_stats.write().await;
         stats.missing += 1;
         return Err(warp::reject::not_found());
@@ -333,7 +333,7 @@ async fn handle_request_inner(
     let headers = res.headers();
     let mtime =
         httpdate::parse_http_date(headers.get("last-modified").unwrap().to_str().unwrap()).unwrap();
-    let body = hyper::body::to_bytes(res).await.unwrap();
+    let body = warp::hyper::body::to_bytes(res).await.unwrap();
 
     let body_to_write = body.clone();
     tokio::spawn(async move {
