@@ -109,6 +109,7 @@ fn spawn_summary(name: String, locked_global_stats: GlobalStats) {
     tokio::spawn(async move {
         let socket = std::net::UdpSocket::bind("127.0.0.1:0").expect("failed to bind stats socket");
         loop {
+            tokio::time::sleep(Duration::from_secs(10)).await;
             {
                 for (silo, locked_stats) in locked_global_stats.read().await.iter() {
                     let mut stats = locked_stats.write().await;
@@ -135,7 +136,6 @@ fn spawn_summary(name: String, locked_global_stats: GlobalStats) {
                     stats.last_hitrate = hitrate;
                 }
             }
-            tokio::time::sleep(Duration::from_secs(10)).await;
         }
     });
 }
