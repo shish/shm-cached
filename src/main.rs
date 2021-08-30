@@ -108,6 +108,8 @@ fn drop_privs(user: Option<String>) -> Result<(), privdrop::PrivDropError> {
     Ok(())
 }
 
+/// Spawn a separate future which will, every 10 seconds, send a bunch of
+/// UDP packets containing summaries of how many requests we've served
 fn spawn_summary(name: String, locked_global_stats: GlobalStats) {
     tokio::spawn(async move {
         let socket = std::net::UdpSocket::bind("127.0.0.1:0").expect("failed to bind stats socket");
@@ -143,6 +145,9 @@ fn spawn_summary(name: String, locked_global_stats: GlobalStats) {
     });
 }
 
+/// Reverse-proxy through to certbot
+/// (I wonder if somebody's built an off-the-shelf ACME handler for Warp,
+/// so that shm-cached could handle its own certificate renewal...)
 async fn handle_acme(file: String) -> Result<Box<dyn warp::Reply>, warp::Rejection> {
     let certbot = format!("http://localhost:888/.well-known/acme-challenge/{}", file);
     let client = Client::new();
@@ -151,6 +156,7 @@ async fn handle_acme(file: String) -> Result<Box<dyn warp::Reply>, warp::Rejecti
     Ok(Box::new(resp))
 }
 
+/// Increment in-progress counter, call inner request handler, decrement counter
 async fn handle_request(
     silo: String,
     hash: String,

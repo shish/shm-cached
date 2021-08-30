@@ -10,6 +10,10 @@ use tokio_postgres::{AsyncMessage, NoTls};
 
 use crate::types::{GlobalSilos, GlobalStats, Stats};
 
+/// Configure and spawn a future which will
+/// - query initial configs + banned images
+/// - listen for database notifications
+///   - update configs or banned images as appropriate
 pub async fn spawn_db_listener(
     dsn: String,
     name: String,
@@ -81,6 +85,8 @@ pub async fn spawn_db_listener(
     Ok(())
 }
 
+/// Update our silo configs (Flexihash instances) based on database values.
+/// Called once per-silo on startup, and then whenever the database is updated.
 async fn populate_silo(
     locked_silos: &GlobalSilos,
     db: &tokio_postgres::Client,
@@ -117,6 +123,8 @@ async fn populate_silo(
     Ok(())
 }
 
+/// Purge a cached image (called a bunch of times on startup, and then
+/// whenever a new image is added to the banned list)
 async fn clean(cache: &str, locked_silos: &GlobalSilos, hash: &str) {
     let silos = locked_silos.read().await;
     for silo in silos.keys() {
