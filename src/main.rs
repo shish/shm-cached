@@ -20,13 +20,13 @@ use crate::types::*;
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::from_args();
-    let dsn = args.dsn.clone();
+    let arc_args = Arc::new(args.clone());
 
     pretty_env_logger::init();
     let fqdn = gethostname::gethostname().into_string().unwrap();
-    let name = match args.name.clone() {
+    let name = match args.name {
         Some(name) => name,
-        None => fqdn.split('.').next().unwrap().to_string(),
+        None => fqdn.split('.').next().unwrap().to_owned(),
     };
     info!(
         "shm-cached {} built on {} - running on {} ({})",
@@ -42,18 +42,17 @@ async fn main() -> Result<()> {
     let silos = HashMap::new();
 
     let locked_stats = GlobalStats::default();
-    let locked_args = Arc::new(RwLock::new(args.clone()));
     let locked_silos = Arc::new(RwLock::new(silos));
 
     spawn_db_listener(
-        dsn.clone(),
-        name.clone(),
-        args.cache,
+        &args.dsn,
+        &name,
+        &args.cache,
         locked_silos.clone(),
         locked_stats.clone(),
     )
     .await?;
-    spawn_summary(name.clone(), locked_stats.clone());
+    spawn_summary(&name, locked_stats.clone());
 
     // GET /robots.txt -> hard-coding which silos shouldn't be crawled
     let robots = warp::path!("robots.txt").map(|| "User-agent: *\nDisallow: /_thumbs/\nAllow: /\n");
@@ -63,7 +62,7 @@ async fn main() -> Result<()> {
 
     // GET /<silo>/<hash>/<room> -> fetch from cache
     let cache_path = warp::path!(String / String / String)
-        .and(warp::any().map(move || locked_args.clone()))
+        .and(warp::any().map(move || arc_args.clone()))
         .and(warp::any().map(move || locked_stats.clone()))
         .and(warp::any().map(move || locked_silos.clone()))
         .and(warp::any().map(move || name.clone()))
@@ -77,27 +76,25 @@ async fn main() -> Result<()> {
     let addr: std::net::IpAddr = args.address.parse()?;
     let http_addr = (addr, args.port);
     let https_addr = (addr, args.sport);
-    let tls = args.tls;
-    let user = args.user;
 
     let http = warp::serve(routes.clone()).run(http_addr);
-    if let Some(tls) = tls {
+    if let Some(tls) = &args.tls {
         let https = warp::serve(routes)
             .tls()
             .cert_path(format!("{}/fullchain.pem", tls))
             .key_path(format!("{}/privkey.pem", tls))
             .run(https_addr);
-        drop_privs(user)?;
+        drop_privs(&args.user)?;
         futures::future::join(http, https).await;
     } else {
-        drop_privs(user)?;
+        drop_privs(&args.user)?;
         http.await;
     }
 
     Ok(())
 }
 
-fn drop_privs(user: Option<String>) -> Result<()> {
+fn drop_privs(user: &Option<String>) -> Result<()> {
     if let Some(user) = user {
         info!("Dropping from root to {}", user);
         privdrop::PrivDrop::default()
@@ -110,7 +107,8 @@ fn drop_privs(user: Option<String>) -> Result<()> {
 
 /// Spawn a separate future which will, every 10 seconds, send a bunch of
 /// UDP packets containing summaries of how many requests we've served
-fn spawn_summary(name: String, locked_global_stats: GlobalStats) {
+fn spawn_summary(name: &str, locked_global_stats: GlobalStats) {
+    let name = name.to_string();
     tokio::spawn(async move {
         let socket = std::net::UdpSocket::bind("127.0.0.1:0").expect("failed to bind stats socket");
         loop {
@@ -161,7 +159,7 @@ async fn handle_request(
     silo: String,
     hash: String,
     human: String,
-    locked_args: GlobalArgs,
+    args: GlobalArgs,
     locked_global_stats: GlobalStats,
     locked_silos: GlobalSilos,
     me: String,
@@ -183,7 +181,7 @@ async fn handle_request(
         silo,
         hash,
         human,
-        locked_args,
+        args,
         locked_stats.clone(),
         locked_silos,
         me,
@@ -201,7 +199,7 @@ async fn handle_request_inner(
     silo: String,
     hash: String,
     human: String,
-    locked_args: GlobalArgs,
+    args: GlobalArgs,
     locked_stats: Arc<RwLock<Stats>>,
     locked_silos: GlobalSilos,
     me: String,
@@ -250,20 +248,15 @@ async fn handle_request_inner(
         }
     };
 
-    let (path, url) = {
-        let args = locked_args.read().await;
-        (
-            Path::new(args.cache.as_str())
-                .join(&silo)
-                .join(&hash[0..2])
-                .join(&hash[2..4])
-                .join(&hash),
-            Path::new(args.backend.as_str())
-                .join(&silo)
-                .join(&hash)
-                .join("human.jpg"),
-        )
-    };
+    let path = Path::new(args.cache.as_str())
+        .join(&silo)
+        .join(&hash[0..2])
+        .join(&hash[2..4])
+        .join(&hash);
+    let url = Path::new(args.backend.as_str())
+        .join(&silo)
+        .join(&hash)
+        .join("human.jpg");
 
     // ================================================================
     // If we don't own this image, redirect to the owner

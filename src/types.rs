@@ -93,6 +93,6 @@ pub struct Args {
     pub version: bool,
 }
 
-pub type GlobalArgs = Arc<RwLock<Args>>;
+pub type GlobalArgs = Arc<Args>;
 pub type GlobalSilos = Arc<RwLock<HashMap<String, Flexihash>>>;
 pub type GlobalStats = Arc<RwLock<HashMap<String, Arc<RwLock<Stats>>>>>;

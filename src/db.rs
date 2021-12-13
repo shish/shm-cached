@@ -15,13 +15,13 @@ use crate::types::{GlobalSilos, GlobalStats, Stats};
 /// - listen for database notifications
 ///   - update configs or banned images as appropriate
 pub async fn spawn_db_listener(
-    dsn: String,
-    name: String,
-    cache: String,
+    dsn: &str,
+    name: &str,
+    cache: &str,
     locked_silos: GlobalSilos,
     locked_stats: GlobalStats,
 ) -> Result<()> {
-    let (db, mut connection) = tokio_postgres::connect(dsn.as_str(), NoTls).await?;
+    let (db, mut connection) = tokio_postgres::connect(dsn, NoTls).await?;
 
     let (tx, mut rx) = mpsc::unbounded();
     let stream =
@@ -60,9 +60,10 @@ pub async fn spawn_db_listener(
         .await?;
     for row in existing_bans {
         let hash = row.get(0);
-        clean(&cache, &locked_silos, hash).await;
+        clean(cache, &locked_silos, hash).await;
     }
 
+    let cache = cache.to_string();
     tokio::spawn(async move {
         loop {
             if let Some(AsyncMessage::Notification(future_notification)) = rx.next().await {
