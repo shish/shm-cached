@@ -267,7 +267,7 @@ async fn handle_request_inner(
     if owner != me && backup != me {
         /*
         if path.exists() {
-            if let Err(x) = fs::remove_file(path.clone()).await {
+            if let Err(x) = fs::remove_file(&path).await {
                 error!("Failed to remove {:?}: {}", path, x);
             }
             let mut stats = locked_stats.write().await;
@@ -293,9 +293,9 @@ async fn handle_request_inner(
             let mut stats = locked_stats.write().await;
             stats.block_disk += 1;
         }
-        let mtime_secs = utime::get_file_times(path.clone()).unwrap().1;
+        let mtime_secs = utime::get_file_times(&path).unwrap().1;
         let mtime = UNIX_EPOCH + Duration::from_secs(mtime_secs as u64);
-        let body = fs::read(path).await.unwrap();
+        let body = fs::read(&path).await.unwrap();
         {
             let mut stats = locked_stats.write().await;
             stats.block_disk -= 1;
@@ -346,11 +346,11 @@ async fn handle_request_inner(
         fs::create_dir_all(path.parent().unwrap())
             .await
             .expect("Failed to create parent dir");
-        fs::write(path.clone(), &body_to_write)
+        fs::write(&path, &body_to_write)
             .await
             .expect("Failed to write file");
         let mtime_secs = mtime.duration_since(UNIX_EPOCH).unwrap().as_secs() as i64;
-        utime::set_file_times(path.clone(), mtime_secs, mtime_secs).expect("Failed to set mtime");
+        utime::set_file_times(&path, mtime_secs, mtime_secs).expect("Failed to set mtime");
     });
 
     let mut stats = locked_stats.write().await;

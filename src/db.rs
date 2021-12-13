@@ -135,7 +135,7 @@ async fn clean(cache: &str, locked_silos: &GlobalSilos, hash: &str) {
             .join(&hash[2..4])
             .join(&hash);
         if path.exists() {
-            if let Err(x) = std::fs::remove_file(path.clone()) {
+            if let Err(x) = std::fs::remove_file(&path) {
                 warn!("Failed to remove {:?}: {}", path, x);
             } else {
                 debug!("Purged {:?}", path);
