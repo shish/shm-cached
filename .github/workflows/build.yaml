@@ -3,8 +3,6 @@ name: Test & Publish
 on:
   push:
   pull_request:
-  schedule:
-    - cron: '0 2 * * 0' # Weekly on Sundays at 02:00
 
 jobs:
   build:
