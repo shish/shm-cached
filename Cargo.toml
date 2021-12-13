@@ -6,19 +6,20 @@ edition = "2018"
 build = "build.rs"
 
 [dependencies]
-flexihash = "*"
+flexihash = "0.1"
 tokio = { version = "1", features = ["full"] }
 tokio-postgres = "0.7"
 tokio-rustls = "0.22"
 warp = { version = "0.3", features = ["tls"] }
-pretty_env_logger = "*"
-structopt = "*"
-utime = "*"
-httpdate = "*"
-futures = "*"
-log = "*"
-privdrop = "*"
-gethostname = "*"
+pretty_env_logger = "0.4"
+structopt = "0.3"
+utime = "0.3"
+httpdate = "1"
+futures = "0.3"
+log = "0.4"
+privdrop = "0.5"
+gethostname = "0.2"
+anyhow = "1"
 
 [build-dependencies]
 vergen = "3"

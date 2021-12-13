@@ -1,5 +1,5 @@
+use anyhow::Result;
 use std::collections::HashMap;
-use std::error::Error;
 use std::path::Path;
 use std::sync::Arc;
 use std::time::{Duration, UNIX_EPOCH};
@@ -18,7 +18,7 @@ use crate::db::spawn_db_listener;
 use crate::types::*;
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn Error>> {
+async fn main() -> Result<()> {
     let args = Args::from_args();
     let dsn = args.dsn.clone();
 
@@ -97,7 +97,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-fn drop_privs(user: Option<String>) -> Result<(), privdrop::PrivDropError> {
+fn drop_privs(user: Option<String>) -> Result<()> {
     if let Some(user) = user {
         info!("Dropping from root to {}", user);
         privdrop::PrivDrop::default()

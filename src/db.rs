@@ -1,8 +1,8 @@
+use anyhow::Result;
 use flexihash::Flexihash;
 use futures::channel::mpsc;
 use futures::FutureExt;
 use futures::{future, stream, StreamExt};
-use std::error::Error;
 use std::path::Path;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -20,7 +20,7 @@ pub async fn spawn_db_listener(
     cache: String,
     locked_silos: GlobalSilos,
     locked_stats: GlobalStats,
-) -> Result<(), Box<dyn Error>> {
+) -> Result<()> {
     let (db, mut connection) = tokio_postgres::connect(dsn.as_str(), NoTls).await?;
 
     let (tx, mut rx) = mpsc::unbounded();
@@ -92,7 +92,7 @@ async fn populate_silo(
     db: &tokio_postgres::Client,
     name: &str,
     key: &str,
-) -> Result<(), Box<dyn Error>> {
+) -> Result<()> {
     let name = name.to_string();
     let key = key.to_string();
     let mut silos = locked_silos.write().await;
