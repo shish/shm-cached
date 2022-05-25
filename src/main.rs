@@ -8,11 +8,9 @@ use tokio::fs;
 use tokio::sync::RwLock;
 use warp::hyper::Client;
 use warp::{http::Response, http::Uri, Filter};
+use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 mod db;
 mod types;
-
-#[macro_use]
-extern crate log;
 
 use crate::db::spawn_db_listener;
 use crate::types::*;
@@ -22,13 +20,19 @@ async fn main() -> Result<()> {
     let args = Args::parse();
     let arc_args = Arc::new(args.clone());
 
-    pretty_env_logger::init();
+    tracing_subscriber::registry()
+        .with(tracing_subscriber::EnvFilter::new(
+            std::env::var("RUST_LOG").unwrap_or_else(|_| "cinema_be=info".into()),
+        ))
+        .with(tracing_subscriber::fmt::layer())
+        .init();
+
     let fqdn = gethostname::gethostname().into_string().unwrap();
     let name = match args.name {
         Some(name) => name,
         None => fqdn.split('.').next().unwrap().to_owned(),
     };
-    info!(
+    tracing::info!(
         "shm-cached {} built on {} - running on {} ({})",
         env!("VERGEN_SHA_SHORT"),
         env!("VERGEN_BUILD_DATE"),
@@ -96,7 +100,7 @@ async fn main() -> Result<()> {
 
 fn drop_privs(user: &Option<String>) -> Result<()> {
     if let Some(user) = user {
-        info!("Dropping from root to {}", user);
+        tracing::info!("Dropping from root to {}", user);
         privdrop::PrivDrop::default()
             // .chroot("/var/empty")
             .user(user)
@@ -129,7 +133,7 @@ fn spawn_summary(name: &str, locked_global_stats: GlobalStats) {
                         stats.to_string(),
                         hitrate
                     );
-                    debug!("{}", msg);
+                    tracing::debug!("{}", msg);
                     socket
                         .send_to(msg.as_bytes(), "127.0.0.1:8094")
                         .expect("failed to send message");
@@ -150,7 +154,7 @@ async fn handle_acme(file: String) -> Result<Box<dyn warp::Reply>, warp::Rejecti
     let certbot = format!("http://localhost:888/.well-known/acme-challenge/{}", file);
     let client = Client::new();
     let resp = client.get(certbot.parse().unwrap()).await.unwrap();
-    info!("Acme-challenge: {}", file);
+    tracing::info!("Acme-challenge: {}", file);
     Ok(Box::new(resp))
 }
 

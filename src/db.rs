@@ -105,7 +105,7 @@ async fn populate_silo(
 
     let parts: Vec<&str> = targets.split(|c| c == '{' || c == '}').collect();
     let targets = parts.get(1).unwrap();
-    info!("{} -> {}", name, targets);
+    tracing::info!("{} -> {}", name, targets);
 
     let mut fh = Flexihash::new();
 
@@ -136,9 +136,9 @@ async fn clean(cache: &str, locked_silos: &GlobalSilos, hash: &str) {
             .join(&hash);
         if path.exists() {
             if let Err(x) = std::fs::remove_file(&path) {
-                warn!("Failed to remove {:?}: {}", path, x);
+                tracing::warn!("Failed to remove {:?}: {}", path, x);
             } else {
-                debug!("Purged {:?}", path);
+                tracing::debug!("Purged {:?}", path);
             }
         }
     }
