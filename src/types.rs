@@ -1,7 +1,7 @@
 use flexihash::Flexihash;
 use std::collections::HashMap;
 use std::sync::Arc;
-use structopt::StructOpt;
+use clap::Parser;
 use tokio::sync::RwLock;
 
 #[derive(Default, Debug)]
@@ -49,47 +49,48 @@ impl std::fmt::Display for Stats {
     }
 }
 
-#[derive(StructOpt, Clone)]
-#[structopt(about = "HTTP cache optimised for Shimmie galleries")]
+// HTTP cache optimised for Shimmie galleries
+#[derive(Parser, Clone)]
+#[clap(author, version, about, long_about = None)]
 pub struct Args {
     /// Where the cached files should be stored
-    #[structopt(short = "c", default_value = "/data/shm_cache/")]
+    #[clap(short = 'c', default_value = "/data/shm_cache/")]
     pub cache: String,
 
     /// Where we should fetch files if we don't have a local copy
-    #[structopt(short = "b", default_value = "http://localhost:81")]
+    #[clap(short = 'b', default_value = "http://localhost:81")]
     pub backend: String,
 
     /// Where should we find our load balancer settings
-    #[structopt(short = "d", default_value = "user=test host=localhost")]
+    #[clap(short = 'd', default_value = "user=test host=localhost")]
     pub dsn: String,
 
     /// Path to a folder containing fullchain.pem and privkey.pem
-    #[structopt(short = "t")]
+    #[clap(short = 't')]
     pub tls: Option<String>,
 
     /// User to switch to after binding sockets
-    #[structopt(short = "u")]
+    #[clap(short = 'u')]
     pub user: Option<String>,
 
     /// This host's name
-    #[structopt(short = "n")]
+    #[clap(short = 'n')]
     pub name: Option<String>,
 
     /// IP address to bind to
-    #[structopt(short = "a", default_value = "0.0.0.0")]
+    #[clap(short = 'a', default_value = "0.0.0.0")]
     pub address: String,
 
     /// HTTP Port
-    #[structopt(short = "p", default_value = "8080")]
+    #[clap(short = 'p', default_value = "8080")]
     pub port: u16,
 
     /// HTTPS Port
-    #[structopt(short = "s", default_value = "8443")]
+    #[clap(short = 's', default_value = "8443")]
     pub sport: u16,
 
     /// Show version
-    #[structopt(long = "version")]
+    #[clap(long = "version")]
     pub version: bool,
 }
 

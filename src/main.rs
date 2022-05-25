@@ -1,9 +1,9 @@
 use anyhow::Result;
+use clap::Parser;
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
 use std::time::{Duration, UNIX_EPOCH};
-use structopt::StructOpt;
 use tokio::fs;
 use tokio::sync::RwLock;
 use warp::hyper::Client;
@@ -19,7 +19,7 @@ use crate::types::*;
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let args = Args::from_args();
+    let args = Args::parse();
     let arc_args = Arc::new(args.clone());
 
     pretty_env_logger::init();
@@ -57,7 +57,7 @@ async fn main() -> Result<()> {
     // GET /robots.txt -> hard-coding which silos shouldn't be crawled
     let robots = warp::path!("robots.txt").map(|| "User-agent: *\nDisallow: /_thumbs/\nAllow: /\n");
 
-    // GET /.well-known/acme-challenge/* -> Let's Encrypt challenge responses
+    // GET /.well-known/acme-challenge/* -> Let's Encrypt chhallenge responses
     let certbot = warp::path!(".well-known" / "acme-challenge" / String).and_then(handle_acme);
 
     // GET /<silo>/<hash>/<room> -> fetch from cache
