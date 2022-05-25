@@ -1,4 +1,5 @@
 use anyhow::Result;
+use axum::body::Full;
 use clap::Parser;
 use std::collections::HashMap;
 use std::path::Path;
@@ -7,13 +8,25 @@ use std::time::{Duration, UNIX_EPOCH};
 use tokio::fs;
 use tokio::sync::RwLock;
 use warp::hyper::Client;
-use warp::{http::Response, http::Uri, Filter};
+use warp::http::{Response, Uri};
+use axum::extract::Extension;
+use axum::{http::StatusCode, response::IntoResponse, routing::get, Router};
+use axum_server::tls_rustls::RustlsConfig;
+use tower_http::trace::TraceLayer;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
+
 mod db;
 mod types;
 
 use crate::db::spawn_db_listener;
 use crate::types::*;
+
+struct AppState {
+    name: String,
+    args: GlobalArgs,
+    locked_stats: GlobalStats,
+    locked_silos: GlobalSilos,
+}
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -22,7 +35,7 @@ async fn main() -> Result<()> {
 
     tracing_subscriber::registry()
         .with(tracing_subscriber::EnvFilter::new(
-            std::env::var("RUST_LOG").unwrap_or_else(|_| "cinema_be=info".into()),
+            std::env::var("RUST_LOG").unwrap_or_else(|_| "shm_cached=info".into()),
         ))
         .with(tracing_subscriber::fmt::layer())
         .init();
@@ -48,6 +61,13 @@ async fn main() -> Result<()> {
     let locked_stats = GlobalStats::default();
     let locked_silos = Arc::new(RwLock::new(silos));
 
+    let app_state = Arc::new(AppState {
+        name: name.clone(),
+        args: arc_args,
+        locked_stats: locked_stats.clone(),
+        locked_silos: locked_silos.clone(),
+    });
+
     spawn_db_listener(
         &args.dsn,
         &name,
@@ -56,43 +76,45 @@ async fn main() -> Result<()> {
         locked_stats.clone(),
     )
     .await?;
-    spawn_summary(&name, locked_stats.clone());
+    if !args.no_stats {
+        spawn_summary(&name, locked_stats.clone());
+    }
 
-    // GET /robots.txt -> hard-coding which silos shouldn't be crawled
-    let robots = warp::path!("robots.txt").map(|| "User-agent: *\nDisallow: /_thumbs/\nAllow: /\n");
+    let app: _ = Router::new()
+        // GET /robots.txt -> hard-coding which silos shouldn't be crawled
+        .route(
+            "/robots.txt",
+            get(|| async { "User-agent: *\nDisallow: /_thumbs/\nAllow: /\n" }),
+        )
+        // GET /.well-known/acme-challenge/* -> Let's Encrypt chhallenge responses
+        .route("/.well-known/acme-challenge/:file", get(handle_acme))
+        // GET /<silo>/<hash>/<human> -> fetch from cache
+        .route("/:silo/:hash/:human", get(handle_request))
+        .layer(TraceLayer::new_for_http())
+        .layer(Extension(app_state));
+    let service = app.into_make_service();
 
-    // GET /.well-known/acme-challenge/* -> Let's Encrypt chhallenge responses
-    let certbot = warp::path!(".well-known" / "acme-challenge" / String).and_then(handle_acme);
-
-    // GET /<silo>/<hash>/<room> -> fetch from cache
-    let cache_path = warp::path!(String / String / String)
-        .and(warp::any().map(move || arc_args.clone()))
-        .and(warp::any().map(move || locked_stats.clone()))
-        .and(warp::any().map(move || locked_silos.clone()))
-        .and(warp::any().map(move || name.clone()))
-        .and(warp::header::optional::<String>("referer"))
-        .and_then(handle_request);
-
-    let routes = robots.or(certbot).or(cache_path);
-
-    // I really want these to be parameters to a separate function, but
-    // when I put this in a separate function it throws a bunch of errors
     let addr: std::net::IpAddr = args.address.parse()?;
-    let http_addr = (addr, args.port);
-    let https_addr = (addr, args.sport);
+    let http_addr = std::net::SocketAddr::from((addr, args.port));
+    let https_addr = std::net::SocketAddr::from((addr, args.sport));
 
-    let http = warp::serve(routes.clone()).run(http_addr);
+    tracing::debug!("listening on {}", http_addr);
+    let http = axum::Server::bind(&http_addr).serve(service.clone());
+
     if let Some(tls) = &args.tls {
-        let https = warp::serve(routes)
-            .tls()
-            .cert_path(format!("{}/fullchain.pem", tls))
-            .key_path(format!("{}/privkey.pem", tls))
-            .run(https_addr);
+        let config = RustlsConfig::from_pem_file(
+            format!("{}/fullchain.pem", tls),
+            format!("{}/privkey.pem", tls),
+        )
+        .await
+        .unwrap();
+        tracing::debug!("listening on {}", https_addr);
+        let https = axum_server::bind_rustls(https_addr, config).serve(service);
         drop_privs(&args.user)?;
-        futures::future::join(http, https).await;
+        let _ = futures::future::join(http, https).await;
     } else {
         drop_privs(&args.user)?;
-        http.await;
+        let _ = http.await;
     }
 
     Ok(())
@@ -150,30 +172,25 @@ fn spawn_summary(name: &str, locked_global_stats: GlobalStats) {
 /// Reverse-proxy through to certbot
 /// (I wonder if somebody's built an off-the-shelf ACME handler for Warp,
 /// so that shm-cached could handle its own certificate renewal...)
-async fn handle_acme(file: String) -> Result<Box<dyn warp::Reply>, warp::Rejection> {
+async fn handle_acme(file: String) -> impl IntoResponse {
     let certbot = format!("http://localhost:888/.well-known/acme-challenge/{}", file);
     let client = Client::new();
     let resp = client.get(certbot.parse().unwrap()).await.unwrap();
     tracing::info!("Acme-challenge: {}", file);
-    Ok(Box::new(resp))
+    resp
 }
 
 /// Increment in-progress counter, call inner request handler, decrement counter
 async fn handle_request(
-    silo: String,
-    hash: String,
-    human: String,
-    args: GlobalArgs,
-    locked_global_stats: GlobalStats,
-    locked_silos: GlobalSilos,
-    me: String,
-    referer: Option<String>,
-) -> Result<Box<dyn warp::Reply>, warp::Rejection> {
-    let global_stats = locked_global_stats.read().await;
+    axum::extract::Path((silo, hash, human)): axum::extract::Path<(String, String, String)>,
+    Extension(state): Extension<Arc<AppState>>,
+    headers: axum::http::header::HeaderMap,
+) -> Result<impl IntoResponse, (StatusCode, String)> {
+    let global_stats = state.locked_stats.read().await;
     let locked_stats = match global_stats.get(&silo) {
         Some(s) => s,
         None => {
-            return Err(warp::reject::not_found());
+            return Err((StatusCode::NOT_FOUND, "Not Found".to_string()));
         }
     };
 
@@ -181,22 +198,28 @@ async fn handle_request(
         let mut stats = locked_stats.write().await;
         stats.inflight += 1;
     }
+
+    let referer = if headers.contains_key(axum::http::header::REFERER) {
+        Some(headers[axum::http::header::REFERER].to_str().unwrap().to_string())
+    } else {
+        None
+    };
     let ret = handle_request_inner(
         silo,
         hash,
         human,
-        args,
+        state.args.clone(),
         locked_stats.clone(),
-        locked_silos,
-        me,
-        referer,
+        state.locked_silos.clone(),
+        state.name.clone(),
+        referer
     )
     .await;
     {
         let mut stats = locked_stats.write().await;
         stats.inflight -= 1;
     }
-    ret
+    Ok(ret)
 }
 
 async fn handle_request_inner(
@@ -208,7 +231,7 @@ async fn handle_request_inner(
     locked_silos: GlobalSilos,
     me: String,
     referer: Option<String>,
-) -> Result<Box<dyn warp::Reply>, warp::Rejection> {
+) -> Result<impl IntoResponse, (StatusCode, String)> {
     {
         let mut stats = locked_stats.write().await;
         stats.requests += 1;
@@ -233,7 +256,11 @@ async fn handle_request_inner(
                 let target = format!("https://holly.paheal.net/_thumbs/{}/thumb.jpg", hash)
                     .parse::<Uri>()
                     .unwrap();
-                return Ok(Box::new(warp::redirect::temporary(target)));
+                return Ok(Response::builder()
+                    .status(StatusCode::TEMPORARY_REDIRECT)
+                    .header("Location", target.to_string())
+                    .body(Full::from(vec![]))
+                    .unwrap());
             } else {
                 stats.external += 1;
             }
@@ -247,7 +274,7 @@ async fn handle_request_inner(
         match silos.get(&silo) {
             Some(s) => s.lookup_list(&hash, 2),
             None => {
-                return Err(warp::reject::not_found());
+                return Err((StatusCode::NOT_FOUND, "Not Found".to_string()));
             }
         }
     };
@@ -280,13 +307,17 @@ async fn handle_request_inner(
         */
 
         // TODO: parse this out of the image_ilink / tlink etc
-        let target = format!("https://{}.paheal.net/{}/{}/{}", owner, silo, hash, human)
+        let target = format!("https://{}.paheal.net/{}/{}/image.jpg", owner, silo, hash)
             .parse::<Uri>()
             .unwrap();
 
         let mut stats = locked_stats.write().await;
         stats.redirect += 1;
-        return Ok(Box::new(warp::redirect(target)));
+        return Ok(Response::builder()
+            .status(StatusCode::TEMPORARY_REDIRECT)
+            .header("Location", target.to_string())
+            .body(Full::from(vec![]))
+            .unwrap());
     }
 
     // ================================================================
@@ -307,14 +338,13 @@ async fn handle_request_inner(
 
         let mut stats = locked_stats.write().await;
         stats.hits += 1;
-        return Ok(Box::new(
-            Response::builder()
-                .status(200)
-                .header("Content-Type", content_type)
-                .header("Last-Modified", httpdate::fmt_http_date(mtime))
-                .header("Cache-Control", "public, max-age=31556926")
-                .body(body),
-        ));
+        return Ok(Response::builder()
+            .status(StatusCode::OK)
+            .header("Content-Type", content_type)
+            .header("Last-Modified", httpdate::fmt_http_date(mtime))
+            .header("Cache-Control", "public, max-age=31556926")
+            .body(Full::from(body))
+            .unwrap());
     }
 
     // ================================================================
@@ -337,7 +367,7 @@ async fn handle_request_inner(
     if res.status() != warp::hyper::StatusCode::OK {
         let mut stats = locked_stats.write().await;
         stats.missing += 1;
-        return Err(warp::reject::not_found());
+        return Err((StatusCode::NOT_FOUND, "Not Found".to_string()));
     }
 
     let headers = res.headers();
@@ -359,12 +389,12 @@ async fn handle_request_inner(
 
     let mut stats = locked_stats.write().await;
     stats.misses += 1;
-    Ok(Box::new(
-        Response::builder()
-            .status(200)
-            .header("Content-Type", content_type)
-            .header("Last-Modified", httpdate::fmt_http_date(mtime))
-            .header("Cache-Control", "public, max-age=31556926")
-            .body(body),
-    ))
+
+    Ok(Response::builder()
+        .status(StatusCode::OK)
+        .header("Content-Type", content_type)
+        .header("Last-Modified", httpdate::fmt_http_date(mtime))
+        .header("Cache-Control", "public, max-age=31556926")
+        .body(Full::from(body))
+        .unwrap())
 }

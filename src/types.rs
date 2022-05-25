@@ -1,7 +1,7 @@
+use clap::Parser;
 use flexihash::Flexihash;
 use std::collections::HashMap;
 use std::sync::Arc;
-use clap::Parser;
 use tokio::sync::RwLock;
 
 #[derive(Default, Debug)]
@@ -92,6 +92,10 @@ pub struct Args {
     /// Show version
     #[clap(long = "version")]
     pub version: bool,
+
+    /// Don't send stats to dashboards
+    #[clap(long = "no-stats")]
+    pub no_stats: bool,
 }
 
 pub type GlobalArgs = Arc<Args>;
