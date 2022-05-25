@@ -51,7 +51,7 @@ impl std::fmt::Display for Stats {
 
 // HTTP cache optimised for Shimmie galleries
 #[derive(Parser, Clone)]
-#[clap(author, version, about, long_about = None)]
+#[clap(author, version=env!("VERGEN_SHA_SHORT"), about, long_about = None)]
 pub struct Args {
     /// Where the cached files should be stored
     #[clap(short = 'c', default_value = "/data/shm_cache/")]
@@ -88,10 +88,6 @@ pub struct Args {
     /// HTTPS Port
     #[clap(short = 's', default_value = "8443")]
     pub sport: u16,
-
-    /// Show version
-    #[clap(long = "version")]
-    pub version: bool,
 
     /// Don't send stats to dashboards
     #[clap(long = "no-stats")]

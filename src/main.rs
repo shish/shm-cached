@@ -45,16 +45,6 @@ async fn main() -> Result<()> {
         Some(name) => name,
         None => fqdn.split('.').next().unwrap().to_owned(),
     };
-    tracing::info!(
-        "shm-cached {} built on {} - running on {} ({})",
-        env!("VERGEN_SHA_SHORT"),
-        env!("VERGEN_BUILD_DATE"),
-        fqdn,
-        name,
-    );
-    if args.version {
-        return Ok(());
-    }
 
     let silos = HashMap::new();
 
