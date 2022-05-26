@@ -1,5 +1,8 @@
 use anyhow::Result;
 use axum::body::Full;
+use axum::extract::Extension;
+use axum::{http::StatusCode, response::IntoResponse, routing::get, Router};
+use axum_server::tls_rustls::RustlsConfig;
 use clap::Parser;
 use std::collections::HashMap;
 use std::path::Path;
@@ -7,13 +10,10 @@ use std::sync::Arc;
 use std::time::{Duration, UNIX_EPOCH};
 use tokio::fs;
 use tokio::sync::RwLock;
-use warp::hyper::Client;
-use warp::http::{Response, Uri};
-use axum::extract::Extension;
-use axum::{http::StatusCode, response::IntoResponse, routing::get, Router};
-use axum_server::tls_rustls::RustlsConfig;
 use tower_http::trace::TraceLayer;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
+use warp::http::{Response, Uri};
+use warp::hyper::Client;
 
 mod db;
 mod types;
@@ -45,6 +45,14 @@ async fn main() -> Result<()> {
         Some(name) => name,
         None => fqdn.split('.').next().unwrap().to_owned(),
     };
+
+    tracing::info!(
+        "shm-cached {} built on {} - running on {} ({})",
+        env!("VERGEN_SHA_SHORT"),
+        env!("VERGEN_BUILD_DATE"),
+        fqdn,
+        name,
+    );
 
     let silos = HashMap::new();
 
@@ -190,7 +198,12 @@ async fn handle_request(
     }
 
     let referer = if headers.contains_key(axum::http::header::REFERER) {
-        Some(headers[axum::http::header::REFERER].to_str().unwrap().to_string())
+        Some(
+            headers[axum::http::header::REFERER]
+                .to_str()
+                .unwrap()
+                .to_string(),
+        )
     } else {
         None
     };
@@ -202,7 +215,7 @@ async fn handle_request(
         locked_stats.clone(),
         state.locked_silos.clone(),
         state.name.clone(),
-        referer
+        referer,
     )
     .await;
     {
