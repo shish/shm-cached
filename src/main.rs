@@ -89,7 +89,7 @@ async fn main() -> Result<()> {
     let https_addr = std::net::SocketAddr::from((addr, args.sport));
 
     tracing::debug!("listening on {}", http_addr);
-    let http = axum::Server::bind(&http_addr).serve(service.clone());
+    let http = axum_server::bind(http_addr).serve(service.clone());
 
     if let Some(tls) = &args.tls {
         let config = RustlsConfig::from_pem_file(
