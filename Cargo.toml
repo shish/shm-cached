@@ -10,12 +10,12 @@ flexihash = "0.1"
 tokio = { version = "1", features = ["full"] }
 tokio-postgres = "0.7"
 tokio-rustls = "0.23"
-tokio-stream = "*"
+tokio-stream = "0.1"
 axum = { version = "0.6", features = ["headers", "http2"]}
 axum-extra = { version = "0.4", features = ["spa"] }
 tower-http = { version = "0.3.0", features = ["fs", "trace"] }
 axum-server = { version = "0.4", features = ["tls-rustls"] }
-rustls = "*"
+rustls = "0.20"
 rustls-acme = { version = "0.5", features = ["axum"] }
 clap = { version = "4", features = ["derive"] }
 tracing = "0.1"
