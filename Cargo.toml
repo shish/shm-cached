@@ -6,27 +6,27 @@ edition = "2018"
 build = "build.rs"
 
 [dependencies]
+anyhow = "1"
+axum = { version = "0.6", features = ["headers", "http2"]}
+axum-extra = { version = "0.4", features = ["spa"] }
+axum-server = { version = "0.4", features = ["tls-rustls"] }
+clap = { version = "4", features = ["derive"] }
 flexihash = "0.1"
+futures = "0.3"
+gethostname = "0.4"
+httpdate = "1"
+hyper = { version = "0.14", features = ["http1", "client"] }
+privdrop = "0.5"
+rustls = "0.20"
+rustls-acme = { version = "0.5", features = ["axum"] }
 tokio = { version = "1", features = ["full"] }
 tokio-postgres = "0.7"
 tokio-rustls = "0.23"
 tokio-stream = "0.1"
-axum = { version = "0.6", features = ["headers", "http2"]}
-axum-extra = { version = "0.4", features = ["spa"] }
 tower-http = { version = "0.3.0", features = ["fs", "trace"] }
-axum-server = { version = "0.4", features = ["tls-rustls"] }
-rustls = "0.20"
-rustls-acme = { version = "0.5", features = ["axum"] }
-clap = { version = "4", features = ["derive"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 utime = "0.3"
-httpdate = "1"
-futures = "0.3"
-privdrop = "0.5"
-gethostname = "0.4"
-anyhow = "1"
-warp = "0.3"
 
 [build-dependencies]
 anyhow = "1"

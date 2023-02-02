@@ -1,23 +1,25 @@
 use anyhow::Result;
-use axum::body::Full;
 use axum::extract::Extension;
-use axum::{http::StatusCode, response::IntoResponse, routing::get, Router};
+use axum::http::header;
+use axum::http::header::HeaderMap;
+use axum::http::StatusCode;
+use axum::response::IntoResponse;
+use axum::routing::get;
+use axum::Router;
 use clap::Parser;
+use hyper::client::Client;
+use rustls::ServerConfig;
+use rustls_acme::caches::DirCache;
+use rustls_acme::AcmeConfig;
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
 use std::time::{Duration, UNIX_EPOCH};
 use tokio::fs;
 use tokio::sync::RwLock;
+use tokio_stream::StreamExt;
 use tower_http::trace::TraceLayer;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
-use warp::http::{Response, Uri};
-use warp::hyper::Client;
-use tokio_stream::StreamExt;
-
-use rustls::ServerConfig;
-use rustls_acme::caches::DirCache;
-use rustls_acme::AcmeConfig;
 
 mod db;
 mod types;
@@ -94,7 +96,9 @@ async fn main() -> Result<()> {
             }
         });
         Some(acceptor)
-    } else { None };
+    } else {
+        None
+    };
 
     spawn_db_listener(
         &args.dsn,
@@ -128,8 +132,14 @@ async fn main() -> Result<()> {
     let http = axum_server::bind(http_addr).serve(service.clone());
     let https = if let Some(acceptor) = acceptor {
         tracing::debug!("listening on {}", https_addr);
-        Some(axum_server::bind(https_addr).acceptor(acceptor).serve(service.clone()))
-    } else { None };
+        Some(
+            axum_server::bind(https_addr)
+                .acceptor(acceptor)
+                .serve(service.clone()),
+        )
+    } else {
+        None
+    };
 
     drop_privs(&args.user)?;
 
@@ -269,14 +279,10 @@ async fn handle_request_inner(
                 stats.paheal += 1;
             } else if referer.contains("google") {
                 stats.google += 1;
-                let target = format!("https://holly.paheal.net/_thumbs/{}/thumb.jpg", hash)
-                    .parse::<Uri>()
-                    .unwrap();
-                return Ok(Response::builder()
-                    .status(StatusCode::TEMPORARY_REDIRECT)
-                    .header("Location", target.to_string())
-                    .body(Full::from(vec![]))
-                    .unwrap());
+                let target = format!("https://holly.paheal.net/_thumbs/{}/thumb.jpg", hash);
+                let mut header_map = HeaderMap::new();
+                header_map.insert(header::LOCATION, target.parse().unwrap());
+                return Ok((StatusCode::TEMPORARY_REDIRECT, header_map, vec![]));
             } else {
                 stats.external += 1;
             }
@@ -323,17 +329,13 @@ async fn handle_request_inner(
         */
 
         // TODO: parse this out of the image_ilink / tlink etc
-        let target = format!("https://{}.paheal.net/{}/{}/image.jpg", owner, silo, hash)
-            .parse::<Uri>()
-            .unwrap();
+        let target = format!("https://{}.paheal.net/{}/{}/image.jpg", owner, silo, hash);
 
         let mut stats = locked_stats.write().await;
         stats.redirect += 1;
-        return Ok(Response::builder()
-            .status(StatusCode::TEMPORARY_REDIRECT)
-            .header("Location", target.to_string())
-            .body(Full::from(vec![]))
-            .unwrap());
+        let mut header_map = HeaderMap::new();
+        header_map.insert(header::LOCATION, target.parse().unwrap());
+        return Ok((StatusCode::TEMPORARY_REDIRECT, header_map, vec![]));
     }
 
     // ================================================================
@@ -354,13 +356,18 @@ async fn handle_request_inner(
 
         let mut stats = locked_stats.write().await;
         stats.hits += 1;
-        return Ok(Response::builder()
-            .status(StatusCode::OK)
-            .header("Content-Type", content_type)
-            .header("Last-Modified", httpdate::fmt_http_date(mtime))
-            .header("Cache-Control", "public, max-age=31556926")
-            .body(Full::from(body))
-            .unwrap());
+
+        let mut header_map = HeaderMap::new();
+        header_map.insert(header::CONTENT_TYPE, content_type.parse().unwrap());
+        header_map.insert(
+            header::LAST_MODIFIED,
+            httpdate::fmt_http_date(mtime).parse().unwrap(),
+        );
+        header_map.insert(
+            header::CACHE_CONTROL,
+            "public, max-age=31556926".parse().unwrap(),
+        );
+        return Ok((StatusCode::OK, header_map, body));
     }
 
     // ================================================================
@@ -380,7 +387,7 @@ async fn handle_request_inner(
         stats.block_net -= 1;
     }
 
-    if res.status() != warp::hyper::StatusCode::OK {
+    if res.status() != StatusCode::OK {
         let mut stats = locked_stats.write().await;
         stats.missing += 1;
         return Err((StatusCode::NOT_FOUND, "Not Found".to_string()));
@@ -389,7 +396,7 @@ async fn handle_request_inner(
     let headers = res.headers();
     let mtime =
         httpdate::parse_http_date(headers.get("last-modified").unwrap().to_str().unwrap()).unwrap();
-    let body = warp::hyper::body::to_bytes(res).await.unwrap();
+    let body = hyper::body::to_bytes(res).await.unwrap();
 
     let body_to_write = body.clone();
     tokio::spawn(async move {
@@ -406,11 +413,15 @@ async fn handle_request_inner(
     let mut stats = locked_stats.write().await;
     stats.misses += 1;
 
-    Ok(Response::builder()
-        .status(StatusCode::OK)
-        .header("Content-Type", content_type)
-        .header("Last-Modified", httpdate::fmt_http_date(mtime))
-        .header("Cache-Control", "public, max-age=31556926")
-        .body(Full::from(body))
-        .unwrap())
+    let mut header_map = HeaderMap::new();
+    header_map.insert(header::CONTENT_TYPE, content_type.parse().unwrap());
+    header_map.insert(
+        header::LAST_MODIFIED,
+        httpdate::fmt_http_date(mtime).parse().unwrap(),
+    );
+    header_map.insert(
+        header::CACHE_CONTROL,
+        "public, max-age=31556926".parse().unwrap(),
+    );
+    Ok((StatusCode::OK, header_map, body.into()))
 }
