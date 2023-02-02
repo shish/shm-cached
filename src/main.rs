@@ -2,7 +2,6 @@ use anyhow::Result;
 use axum::body::Full;
 use axum::extract::Extension;
 use axum::{http::StatusCode, response::IntoResponse, routing::get, Router};
-use axum_server::tls_rustls::RustlsConfig;
 use clap::Parser;
 use std::collections::HashMap;
 use std::path::Path;
@@ -14,6 +13,11 @@ use tower_http::trace::TraceLayer;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 use warp::http::{Response, Uri};
 use warp::hyper::Client;
+use tokio_stream::StreamExt;
+
+use rustls::ServerConfig;
+use rustls_acme::caches::DirCache;
+use rustls_acme::AcmeConfig;
 
 mod db;
 mod types;
@@ -66,6 +70,29 @@ async fn main() -> Result<()> {
         locked_silos: locked_silos.clone(),
     });
 
+    // Let's Encrypt support
+    let acceptor = if let Some(tls) = args.tls {
+        let mut state = AcmeConfig::new([fqdn])
+            .contact([format!("mailto:{}", tls)])
+            .cache_option(Some(DirCache::new(format!("{}/.tls", args.cache))))
+            .directory_lets_encrypt(true)
+            .state();
+        let rustls_config = ServerConfig::builder()
+            .with_safe_defaults()
+            .with_no_client_auth()
+            .with_cert_resolver(state.resolver());
+        let acceptor = state.axum_acceptor(Arc::new(rustls_config));
+        tokio::spawn(async move {
+            loop {
+                match state.next().await.unwrap() {
+                    Ok(ok) => tracing::info!("acme event: {:?}", ok),
+                    Err(err) => tracing::error!("acme error: {:?}", err),
+                }
+            }
+        });
+        Some(acceptor)
+    } else { None };
+
     spawn_db_listener(
         &args.dsn,
         &name,
@@ -84,8 +111,6 @@ async fn main() -> Result<()> {
             "/robots.txt",
             get(|| async { "User-agent: *\nDisallow: /_thumbs/\nAllow: /\n" }),
         )
-        // GET /.well-known/acme-challenge/* -> Let's Encrypt chhallenge responses
-        .route("/.well-known/acme-challenge/:file", get(handle_acme))
         // GET /<silo>/<hash>/<human> -> fetch from cache
         .route("/:silo/:hash/:human", get(handle_request))
         .layer(TraceLayer::new_for_http())
@@ -98,20 +123,16 @@ async fn main() -> Result<()> {
 
     tracing::debug!("listening on {}", http_addr);
     let http = axum_server::bind(http_addr).serve(service.clone());
-
-    if let Some(tls) = &args.tls {
-        let config = RustlsConfig::from_pem_file(
-            format!("{}/fullchain.pem", tls),
-            format!("{}/privkey.pem", tls),
-        )
-        .await
-        .unwrap();
+    let https = if let Some(acceptor) = acceptor {
         tracing::debug!("listening on {}", https_addr);
-        let https = axum_server::bind_rustls(https_addr, config).serve(service);
-        drop_privs(&args.user)?;
+        Some(axum_server::bind(https_addr).acceptor(acceptor).serve(service.clone()))
+    } else { None };
+
+    drop_privs(&args.user)?;
+
+    if let Some(https) = https {
         let _ = futures::future::join(http, https).await;
     } else {
-        drop_privs(&args.user)?;
         let _ = http.await;
     }
 
@@ -165,17 +186,6 @@ fn spawn_summary(name: &str, locked_global_stats: GlobalStats) {
             }
         }
     });
-}
-
-/// Reverse-proxy through to certbot
-/// (I wonder if somebody's built an off-the-shelf ACME handler for Warp,
-/// so that shm-cached could handle its own certificate renewal...)
-async fn handle_acme(file: String) -> impl IntoResponse {
-    let certbot = format!("http://localhost:888/.well-known/acme-challenge/{}", file);
-    let client = Client::new();
-    let resp = client.get(certbot.parse().unwrap()).await.unwrap();
-    tracing::info!("Acme-challenge: {}", file);
-    resp
 }
 
 /// Increment in-progress counter, call inner request handler, decrement counter

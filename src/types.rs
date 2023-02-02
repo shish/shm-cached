@@ -65,7 +65,7 @@ pub struct Args {
     #[clap(short = 'd', default_value = "user=test host=localhost")]
     pub dsn: String,
 
-    /// Path to a folder containing fullchain.pem and privkey.pem
+    /// Contact email address for TLS certificates
     #[clap(short = 't')]
     pub tls: Option<String>,
 
