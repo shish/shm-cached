@@ -44,7 +44,10 @@ async fn main() -> Result<()> {
         .with(tracing_subscriber::fmt::layer())
         .init();
 
-    let fqdn = gethostname::gethostname().into_string().unwrap();
+    let fqdn = match args.fqdn {
+        Some(fqdn) => fqdn,
+        None => gethostname::gethostname().into_string().unwrap(),
+    };
     let name = match args.name {
         Some(name) => name,
         None => fqdn.split('.').next().unwrap().to_owned(),

@@ -77,6 +77,10 @@ pub struct Args {
     #[clap(short = 'n')]
     pub name: Option<String>,
 
+    /// This host's FQDN
+    #[clap(short = 'f')]
+    pub fqdn: Option<String>,
+
     /// IP address to bind to
     #[clap(short = 'a', default_value = "0.0.0.0")]
     pub address: String,
