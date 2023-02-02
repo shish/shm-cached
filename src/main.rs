@@ -48,7 +48,7 @@ async fn main() -> Result<()> {
 
     tracing::info!(
         "shm-cached {} built on {} - running on {} ({})",
-        env!("VERGEN_SHA_SHORT"),
+        env!("VERGEN_GIT_SHA_SHORT"),
         env!("VERGEN_BUILD_DATE"),
         fqdn,
         name,

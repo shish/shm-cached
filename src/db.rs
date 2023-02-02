@@ -6,7 +6,7 @@ use futures::{future, stream, StreamExt};
 use std::path::Path;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use tokio_postgres::{AsyncMessage, NoTls};
+use tokio_postgres::{AsyncMessage, Client, NoTls};
 
 use crate::types::{GlobalSilos, GlobalStats, Stats};
 
@@ -52,16 +52,8 @@ pub async fn spawn_db_listener(
     }
 
     db.query("LISTEN shm_image_bans", &[]).await?;
-    let existing_bans = db
-        .query(
-            "SELECT hash FROM image_bans WHERE date > now() - interval '7 days' ORDER BY hash",
-            &[],
-        )
-        .await?;
-    for row in existing_bans {
-        let hash = row.get(0);
-        clean(cache, &locked_silos, hash).await;
-    }
+
+    clean_all(&db, &cache, &locked_silos).await?;
 
     let cache = cache.to_string();
     tokio::spawn(async move {
@@ -120,6 +112,21 @@ async fn populate_silo(
 
     // info!("{} -> {}", name, fh);
     silos.insert(name.to_string(), fh);
+
+    Ok(())
+}
+
+async fn clean_all(db: &Client, cache: &str, locked_silos: &GlobalSilos) -> Result<()> {
+    let existing_bans = db
+        .query(
+            "SELECT hash FROM image_bans WHERE date > now() - interval '7 days' ORDER BY hash",
+            &[],
+        )
+        .await?;
+    for row in existing_bans {
+        let hash = row.get(0);
+        clean(cache, &locked_silos, hash).await;
+    }
 
     Ok(())
 }
