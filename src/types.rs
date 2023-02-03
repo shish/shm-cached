@@ -65,33 +65,33 @@ pub struct Args {
     #[clap(short = 'd', default_value = "user=test host=localhost")]
     pub dsn: String,
 
-    /// Contact email address for TLS certificates
-    #[clap(short = 't')]
-    pub tls: Option<String>,
-
     /// User to switch to after binding sockets
     #[clap(short = 'u')]
     pub user: Option<String>,
 
-    /// This host's name
+    /// This host's name for consistent hash lookups
     #[clap(short = 'n')]
     pub name: Option<String>,
 
-    /// This host's FQDN
-    #[clap(short = 'f')]
-    pub fqdn: Option<String>,
-
     /// IP address to bind to
     #[clap(short = 'a', default_value = "0.0.0.0")]
-    pub address: String,
+    pub address: std::net::IpAddr,
 
     /// HTTP Port
-    #[clap(short = 'p', default_value = "8080")]
-    pub port: u16,
+    #[clap(short = 'p')]
+    pub port: Option<u16>,
 
     /// HTTPS Port
-    #[clap(short = 's', default_value = "8443")]
-    pub sport: u16,
+    #[clap(short = 's')]
+    pub sport: Option<u16>,
+
+    /// Contact email address for HTTPS certificates
+    #[clap(short = 't')]
+    pub tls: Option<String>,
+
+    /// This host's FQDN for HTTPS certificates
+    #[clap(short = 'f')]
+    pub fqdn: Option<String>,
 
     /// Don't send stats to dashboards
     #[clap(long = "no-stats")]

@@ -42,40 +42,39 @@ async fn main() -> Result<()> {
         name,
     );
 
-    // Let's Encrypt support
-    let acceptor = if let Some(tls) = args.tls.clone() {
-        let mut state = AcmeConfig::new([fqdn])
-            .contact([format!("mailto:{}", tls)])
-            .cache_option(Some(DirCache::new(format!("{}/.tls", args.cache))))
-            .directory_lets_encrypt(true)
-            .state();
-        let rustls_config = ServerConfig::builder()
-            .with_safe_defaults()
-            .with_no_client_auth()
-            .with_cert_resolver(state.resolver());
-        let acceptor = state.axum_acceptor(Arc::new(rustls_config));
-        tokio::spawn(async move {
-            loop {
-                match state.next().await.unwrap() {
-                    Ok(ok) => tracing::info!("acme event: {:?}", ok),
-                    Err(err) => tracing::error!("acme error: {:?}", err),
-                }
-            }
-        });
-        Some(acceptor)
-    } else {
-        None
-    };
-
     let service = make_service(name, &args).await?;
 
-    let addr: std::net::IpAddr = args.address.parse()?;
-    let http_addr = std::net::SocketAddr::from((addr, args.port));
-    let https_addr = std::net::SocketAddr::from((addr, args.sport));
+    let http = if let Some(port) = args.port {
+        let http_addr = std::net::SocketAddr::from((args.address, port));
+        tracing::debug!("listening on {}", http_addr);
+        Some(axum_server::bind(http_addr).serve(service.clone()))
+    } else { None };
 
-    tracing::debug!("listening on {}", http_addr);
-    let http = axum_server::bind(http_addr).serve(service.clone());
-    let https = if let Some(acceptor) = acceptor {
+    let https = if let (Some(sport), Some(tls)) = (args.sport, args.tls.clone()) {
+        // Let's Encrypt support
+        let acceptor = {
+            let mut state = AcmeConfig::new([fqdn])
+                .contact([format!("mailto:{}", tls)])
+                .cache_option(Some(DirCache::new(format!("{}/.tls", args.cache))))
+                .directory_lets_encrypt(true)
+                .state();
+            let rustls_config = ServerConfig::builder()
+                .with_safe_defaults()
+                .with_no_client_auth()
+                .with_cert_resolver(state.resolver());
+            let acceptor = state.axum_acceptor(Arc::new(rustls_config));
+            tokio::spawn(async move {
+                loop {
+                    match state.next().await.unwrap() {
+                        Ok(ok) => tracing::info!("acme event: {:?}", ok),
+                        Err(err) => tracing::error!("acme error: {:?}", err),
+                    }
+                }
+            });
+            acceptor
+        };
+
+        let https_addr = std::net::SocketAddr::from((args.address, sport));
         tracing::debug!("listening on {}", https_addr);
         Some(
             axum_server::bind(https_addr)
@@ -88,10 +87,19 @@ async fn main() -> Result<()> {
 
     drop_privs(&args.user)?;
 
-    if let Some(https) = https {
-        let _ = futures::future::join(http, https).await;
-    } else {
-        http.await?;
+    match(http, https) {
+        (Some(http), Some(https)) => {
+            let _ = futures::future::join(http, https).await;
+        },
+        (Some(http), None) => {
+            http.await?;
+        },
+        (None, Some(https)) => {
+            https.await?;
+        },
+        (None, None) => {
+            return Err(anyhow::anyhow!("No listener provided, use -p and / or -s for HTTP or HTTPS listener"));
+        }
     }
 
     Ok(())
