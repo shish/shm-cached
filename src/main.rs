@@ -41,6 +41,9 @@ async fn main() -> Result<()> {
         fqdn,
         name,
     );
+    if args.version {
+        return Ok(());
+    }
 
     let service = make_service(name, &args).await?;
 
