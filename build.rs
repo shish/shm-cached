@@ -1,10 +1,7 @@
-use anyhow::Result;
-use vergen::{vergen, Config};
-use vergen::{ShaKind, TimestampKind};
+use std::error::Error;
+use vergen::EmitBuilder;
 
-fn main() -> Result<()> {
-    let mut config = Config::default();
-    *config.build_mut().kind_mut() = TimestampKind::All;
-    *config.git_mut().sha_kind_mut() = ShaKind::Short;
-    vergen(config)
+fn main() -> Result<(), Box<dyn Error>> {
+    EmitBuilder::builder().all_build().all_git().emit()?;
+    Ok(())
 }
