@@ -26,7 +26,7 @@ pub async fn spawn_db_listener(
     let (tx, mut rx) = mpsc::unbounded();
     let stream = stream::poll_fn(move |cx| {
         connection.poll_message(cx).map_err(|e| {
-            error!("Database connection error: {}", e);
+            tracing::error!("Database connection error: {}", e);
             std::process::exit(1);
         })
     });
