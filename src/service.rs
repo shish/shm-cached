@@ -1,20 +1,20 @@
 use anyhow::Result;
-use axum::routing::IntoMakeService;
 use axum::extract::Extension;
 use axum::http::header;
 use axum::http::header::HeaderMap;
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::routing::get;
+use axum::routing::IntoMakeService;
 use axum::Router;
-use tower_http::trace::TraceLayer;
 use hyper::client::Client;
-use std::path::Path;
-use tokio::fs;
-use std::time::{Duration, UNIX_EPOCH};
 use std::collections::HashMap;
-use tokio::sync::RwLock;
+use std::path::Path;
 use std::sync::Arc;
+use std::time::{Duration, UNIX_EPOCH};
+use tokio::fs;
+use tokio::sync::RwLock;
+use tower_http::trace::TraceLayer;
 
 use crate::db::spawn_db_listener;
 use crate::types::*;
@@ -53,15 +53,15 @@ pub async fn make_service(name: String, args: &Args) -> Result<IntoMakeService<R
     });
 
     let app: _ = Router::new()
-    // GET /robots.txt -> hard-coding which silos shouldn't be crawled
-    .route(
-        "/robots.txt",
-        get(|| async { "User-agent: *\nDisallow: /_thumbs/\nAllow: /\n" }),
-    )
-    // GET /<silo>/<hash>/<human> -> fetch from cache
-    .route("/:silo/:hash/:human", get(handle_request))
-    .layer(TraceLayer::new_for_http())
-    .layer(Extension(app_state));
+        // GET /robots.txt -> hard-coding which silos shouldn't be crawled
+        .route(
+            "/robots.txt",
+            get(|| async { "User-agent: *\nDisallow: /_thumbs/\nAllow: /\n" }),
+        )
+        // GET /<silo>/<hash>/<human> -> fetch from cache
+        .route("/:silo/:hash/:human", get(handle_request))
+        .layer(TraceLayer::new_for_http())
+        .layer(Extension(app_state));
     Ok(app.into_make_service())
 }
 

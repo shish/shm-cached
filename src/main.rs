@@ -8,8 +8,8 @@ use tokio_stream::StreamExt;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 mod db;
-mod types;
 mod service;
+mod types;
 
 use crate::service::make_service;
 use crate::types::*;
@@ -48,7 +48,9 @@ async fn main() -> Result<()> {
         let http_addr = std::net::SocketAddr::from((args.address, port));
         tracing::debug!("listening on {}", http_addr);
         Some(axum_server::bind(http_addr).serve(service.clone()))
-    } else { None };
+    } else {
+        None
+    };
 
     let https = if let (Some(sport), Some(tls)) = (args.sport, args.tls.clone()) {
         // Let's Encrypt support
@@ -87,18 +89,20 @@ async fn main() -> Result<()> {
 
     drop_privs(&args.user)?;
 
-    match(http, https) {
+    match (http, https) {
         (Some(http), Some(https)) => {
             let _ = futures::future::join(http, https).await;
-        },
+        }
         (Some(http), None) => {
             http.await?;
-        },
+        }
         (None, Some(https)) => {
             https.await?;
-        },
+        }
         (None, None) => {
-            return Err(anyhow::anyhow!("No listener provided, use -p and / or -s for HTTP or HTTPS listener"));
+            return Err(anyhow::anyhow!(
+                "No listener provided, use -p and / or -s for HTTP or HTTPS listener"
+            ));
         }
     }
 
