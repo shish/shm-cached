@@ -33,7 +33,7 @@ jobs:
       run: cargo build --release
     - name: Publish
       if: github.event_name == 'push'
-      uses: eine/tip@master
+      uses: pyTooling/Actions/releaser@r0
       with:
         token: ${{ secrets.GITHUB_TOKEN }}
         files: |
