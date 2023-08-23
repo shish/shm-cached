@@ -1,15 +1,11 @@
 shm-cached
 ==========
-An HTTP cache specifically optimised for Shimmie galleries
+A caching reverse-proxy specifically optimised for [Shimmie](https://github.com/shish/shimmie2/) galleries
 
-- Designed to run as a cluster of image mirrors who coordinate to
-  share the load
-- Gets the load-balancing config by looking at shimmie's config
-  database
-- Automatically re-balances whenever the config changes
-- Integrates with the `image_hash_bans` table to automatically
-  purge things from the cache whenever an image is banned from
-  the gallery
+- Designed to run as a fleet of image mirrors who use consistent hashing to optimally spread the load
+- Reads the load balancing weights directly from Shimmie, no local config to manage
+- Listens for config changes in real time - the fleet of mirrors will automatically redirect traffic between themselves when the load balancing weights change
+- Integrates with the Image Bans system to automatically purge things from the cache whenever an image is banned from the gallery
 
 Why
 ---
