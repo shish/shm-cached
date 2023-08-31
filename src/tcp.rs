@@ -62,7 +62,7 @@ fn serve_stream<T: Unpin + tokio::io::AsyncRead + tokio::io::AsyncWrite + Send +
             .serve_connection(io, app)
             .await
         {
-            tracing::error!("Error serving connection: {:?}", err);
+            tracing::debug!("Error serving connection: {:?}", err);
         }
     });
 
