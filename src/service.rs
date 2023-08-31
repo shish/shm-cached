@@ -1,11 +1,12 @@
+use http_body_util::BodyExt;
 use http_body_util::Full;
 use hyper::body::Bytes;
 use hyper::{Request, Response, StatusCode};
 use std::future::Future;
 use std::path::Path;
 use std::pin::Pin;
+use std::sync::atomic::Ordering;
 use std::time::{Duration, UNIX_EPOCH};
-use http_body_util::BodyExt;
 // use tower_http::trace::TraceLayer;
 
 use crate::stats::GlobalStats;
@@ -49,14 +50,10 @@ impl App {
             "/robots.txt" => mk_response(format!("User-agent: *\nDisallow: /_thumbs/\nAllow: /\n")),
             "/stats.json" => {
                 let global_stats = self.locked_stats.read().await;
-                let stats: HashMap<String, crate::stats::Stats> = futures::future::join_all(
-                    global_stats
-                        .iter()
-                        .map(|(k, v)| async move { (k.clone(), v.read().await.clone()) }),
-                )
-                .await
-                .into_iter()
-                .collect();
+                let stats: HashMap<String, Arc<crate::stats::Stats>> = global_stats
+                    .iter()
+                    .map(|(k, v)| { (k.clone(), v.clone()) })
+                    .collect();
                 mk_response(serde_json::to_string(&stats).unwrap())
             }
             _ => {
@@ -72,7 +69,7 @@ impl App {
                 let human = parts[3].to_string();
 
                 let global_stats = self.locked_stats.read().await;
-                let locked_stats = match global_stats.get(&silo) {
+                let stats = match global_stats.get(&silo) {
                     Some(s) => s,
                     None => {
                         return Ok(Response::builder()
@@ -82,10 +79,7 @@ impl App {
                     }
                 };
 
-                {
-                    let mut stats = locked_stats.write().await;
-                    stats.inflight += 1;
-                }
+                stats.inflight.fetch_add(1, Ordering::SeqCst);
 
                 let referer = if req.headers().contains_key(http::header::REFERER) {
                     Some(
@@ -102,16 +96,13 @@ impl App {
                     hash,
                     human,
                     self.args.clone(),
-                    locked_stats.clone(),
+                    stats.clone(),
                     self.locked_silos.clone(),
                     self.name.clone(),
                     referer,
                 )
                 .await;
-                {
-                    let mut stats = locked_stats.write().await;
-                    stats.inflight -= 1;
-                }
+                stats.inflight.fetch_sub(1, Ordering::SeqCst);
                 ret
             }
         };
@@ -125,15 +116,12 @@ async fn handle_request_inner(
     hash: String,
     human: String,
     args: GlobalArgs,
-    locked_stats: Arc<RwLock<crate::stats::Stats>>,
+    stats: Arc<crate::stats::Stats>,
     locked_silos: GlobalSilos,
     me: String,
     referer: Option<String>,
 ) -> Result<Response<Full<Bytes>>> {
-    {
-        let mut stats = locked_stats.write().await;
-        stats.requests += 1;
-    }
+    stats.requests.fetch_add(1, Ordering::SeqCst);
     let ext = human.rsplit('.').next().unwrap();
     let content_type = match ext {
         "mp4" => "video/mp4",
@@ -145,12 +133,11 @@ async fn handle_request_inner(
     };
 
     if silo == "_images" {
-        let mut stats = locked_stats.write().await;
         if let Some(referer) = referer {
             if referer.contains("paheal.net") {
-                stats.paheal += 1;
+                stats.paheal.fetch_add(1, Ordering::SeqCst);
             } else if referer.contains("google") {
-                stats.google += 1;
+                stats.google.fetch_add(1, Ordering::SeqCst);
                 let target = format!("https://holly.paheal.net/_thumbs/{}/thumb.jpg", hash);
                 return Ok(Response::builder()
                     .status(StatusCode::TEMPORARY_REDIRECT)
@@ -158,10 +145,10 @@ async fn handle_request_inner(
                     .body(fb(""))
                     .unwrap());
             } else {
-                stats.external += 1;
+                stats.external.fetch_add(1, Ordering::SeqCst);
             }
         } else {
-            stats.norefer += 1;
+            stats.norefer.fetch_add(1, Ordering::SeqCst);
         }
     }
 
@@ -209,8 +196,7 @@ async fn handle_request_inner(
         // TODO: parse this out of the image_ilink / tlink etc
         let target = format!("https://{}.paheal.net/{}/{}/image.jpg", owner, silo, hash);
 
-        let mut stats = locked_stats.write().await;
-        stats.redirect += 1;
+        stats.redirect.fetch_add(1, Ordering::SeqCst);
         return Ok(Response::builder()
             .status(StatusCode::TEMPORARY_REDIRECT)
             .header(http::header::LOCATION, target)
@@ -222,20 +208,13 @@ async fn handle_request_inner(
     // If we own this image and it's on disk, serve it
     // ================================================================
     if path.exists() {
-        {
-            let mut stats = locked_stats.write().await;
-            stats.block_disk += 1;
-        }
+        stats.block_disk.fetch_add(1, Ordering::SeqCst);
         let mtime_secs = utime::get_file_times(&path).unwrap().1;
         let mtime = UNIX_EPOCH + Duration::from_secs(mtime_secs as u64);
         let body = tokio::fs::read(&path).await.unwrap();
-        {
-            let mut stats = locked_stats.write().await;
-            stats.block_disk -= 1;
-        }
+        stats.block_disk.fetch_sub(1, Ordering::SeqCst);
 
-        let mut stats = locked_stats.write().await;
-        stats.hits += 1;
+        stats.hits.fetch_add(1, Ordering::SeqCst);
 
         return Ok(Response::builder()
             .status(StatusCode::OK)
@@ -249,27 +228,26 @@ async fn handle_request_inner(
     // ================================================================
     // If we own this image and it's missing, fetch it
     // ================================================================
-    {
-        let mut stats = locked_stats.write().await;
-        stats.block_net += 1;
-    }
+    stats.block_net.fetch_add(1, Ordering::SeqCst);
     let mut res = fetch_url(url).await?;
-    {
-        let mut stats = locked_stats.write().await;
-        stats.block_net -= 1;
-    }
+    stats.block_net.fetch_sub(1, Ordering::SeqCst);
 
     if res.status() != StatusCode::OK {
-        let mut stats = locked_stats.write().await;
-        stats.missing += 1;
+        stats.missing.fetch_add(1, Ordering::SeqCst);
         return Ok(Response::builder()
             .status(StatusCode::NOT_FOUND)
             .body(fb("Not Found"))
             .unwrap());
     }
 
-    let mtime =
-        httpdate::parse_http_date(res.headers().get(http::header::LAST_MODIFIED).unwrap().to_str().unwrap()).unwrap();
+    let mtime = httpdate::parse_http_date(
+        res.headers()
+            .get(http::header::LAST_MODIFIED)
+            .unwrap()
+            .to_str()
+            .unwrap(),
+    )
+    .unwrap();
     // let body = hyper::body::to_bytes(res).await.unwrap();
     let mut body = Vec::new();
     while let Some(next) = res.frame().await {
@@ -291,8 +269,7 @@ async fn handle_request_inner(
         utime::set_file_times(&path, mtime_secs, mtime_secs).expect("Failed to set mtime");
     });
 
-    let mut stats = locked_stats.write().await;
-    stats.misses += 1;
+    stats.misses.fetch_add(1, Ordering::SeqCst);
 
     return Ok(Response::builder()
         .status(StatusCode::OK)

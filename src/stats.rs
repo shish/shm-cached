@@ -1,29 +1,30 @@
+use serde::Serialize;
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::RwLock;
-use serde::Serialize;
 
-#[derive(Default, Debug, Serialize, Clone)]
+#[derive(Default, Debug, Serialize)]
 pub struct Stats {
-    pub requests: usize,
-    pub hits: usize,
-    pub misses: usize,
-    pub redirect: usize,
-    pub missing: usize,
+    pub requests: AtomicUsize,
+    pub hits: AtomicUsize,
+    pub misses: AtomicUsize,
+    pub redirect: AtomicUsize,
+    pub missing: AtomicUsize,
 
-    pub paheal: usize,
-    pub google: usize,
-    pub norefer: usize,
-    pub external: usize,
+    pub paheal: AtomicUsize,
+    pub google: AtomicUsize,
+    pub norefer: AtomicUsize,
+    pub external: AtomicUsize,
 
-    pub inflight: usize,
-    pub block_disk: usize,
-    pub block_net: usize,
+    pub inflight: AtomicUsize,
+    pub block_disk: AtomicUsize,
+    pub block_net: AtomicUsize,
 
-    pub last_hit: usize,
-    pub last_miss: usize,
-    pub last_hitrate: usize,
+    pub last_hit: AtomicUsize,
+    pub last_miss: AtomicUsize,
+    pub last_hitrate: AtomicUsize,
 }
 
 impl std::fmt::Display for Stats {
@@ -33,23 +34,23 @@ impl std::fmt::Display for Stats {
             "requests={},hits={},misses={},redirect={},missing={},\
             paheal={},google={},norefer={},external={},\
             inflight={},block_net={},block_disk={}",
-            self.requests,
-            self.hits,
-            self.misses,
-            self.redirect,
-            self.missing,
-            self.paheal,
-            self.google,
-            self.norefer,
-            self.external,
-            self.inflight,
-            self.block_disk,
-            self.block_net,
+            self.requests.load(Ordering::Relaxed),
+            self.hits.load(Ordering::Relaxed),
+            self.misses.load(Ordering::Relaxed),
+            self.redirect.load(Ordering::Relaxed),
+            self.missing.load(Ordering::Relaxed),
+            self.paheal.load(Ordering::Relaxed),
+            self.google.load(Ordering::Relaxed),
+            self.norefer.load(Ordering::Relaxed),
+            self.external.load(Ordering::Relaxed),
+            self.inflight.load(Ordering::Relaxed),
+            self.block_disk.load(Ordering::Relaxed),
+            self.block_net.load(Ordering::Relaxed),
         )
     }
 }
 
-pub type GlobalStats = Arc<RwLock<HashMap<String, Arc<RwLock<Stats>>>>>;
+pub type GlobalStats = Arc<RwLock<HashMap<String, Arc<Stats>>>>;
 
 /// Spawn a separate future which will, every 10 seconds, send a bunch of
 /// UDP packets containing summaries of how many requests we've served
@@ -60,13 +61,18 @@ pub fn spawn_summary(name: &str, locked_global_stats: GlobalStats) {
         loop {
             tokio::time::sleep(Duration::from_secs(10)).await;
             {
-                for (silo, locked_stats) in locked_global_stats.read().await.iter() {
-                    let mut stats = locked_stats.write().await;
-                    let total = stats.hits - stats.last_hit + stats.misses - stats.last_miss;
+                for (silo, stats) in locked_global_stats.read().await.iter() {
+                    let total = stats.hits.load(Ordering::SeqCst)
+                        - stats.last_hit.load(Ordering::SeqCst)
+                        + stats.misses.load(Ordering::SeqCst)
+                        - stats.last_miss.load(Ordering::SeqCst);
                     let hitrate = if total > 0 {
-                        (stats.hits - stats.last_hit) * 100 / total
+                        (stats.hits.load(Ordering::SeqCst)
+                            - stats.last_hit.load(Ordering::SeqCst))
+                            * 100
+                            / total
                     } else {
-                        stats.last_hitrate
+                        stats.last_hitrate.load(Ordering::SeqCst)
                     };
                     let msg = format!(
                         "shm_cached,name={},silo={} {},hitrate={}",
@@ -80,9 +86,9 @@ pub fn spawn_summary(name: &str, locked_global_stats: GlobalStats) {
                         .send_to(msg.as_bytes(), "127.0.0.1:8094")
                         .expect("failed to send message");
 
-                    stats.last_hit = stats.hits;
-                    stats.last_miss = stats.misses;
-                    stats.last_hitrate = hitrate;
+                    stats.last_hit.store(stats.hits.load(Ordering::SeqCst), Ordering::SeqCst);
+                    stats.last_miss.store(stats.misses.load(Ordering::SeqCst), Ordering::SeqCst);
+                    stats.last_hitrate.store(hitrate, Ordering::SeqCst);
                 }
             }
         }

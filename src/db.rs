@@ -5,7 +5,6 @@ use futures::FutureExt;
 use futures::{future, stream, StreamExt};
 use std::path::Path;
 use std::sync::Arc;
-use tokio::sync::RwLock;
 use tokio_postgres::{AsyncMessage, Client, NoTls};
 
 use crate::stats::{GlobalStats, Stats};
@@ -48,11 +47,11 @@ pub async fn spawn_db_listener(
         let mut stats = locked_stats.write().await;
         stats.insert(
             "_thumbs".to_string(),
-            Arc::new(RwLock::new(Stats::default())),
+            Arc::new(Stats::default()),
         );
         stats.insert(
             "_images".to_string(),
-            Arc::new(RwLock::new(Stats::default())),
+            Arc::new(Stats::default()),
         );
     }
 
