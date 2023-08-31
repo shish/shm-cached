@@ -25,12 +25,12 @@ pub async fn tls_server(
     app: App,
     fqdn: &String,
 ) -> Result<Option<tokio::task::JoinHandle<()>>> {
-    if let Some(sport) = args.sport {
+    if let (Some(sport), Some(mailto)) = (args.sport, args.tls.clone()) {
         let https_addr = std::net::SocketAddr::from((args.address, sport));
         let listener = tokio::net::TcpListener::bind(https_addr).await?;
         let incoming = tokio_stream::wrappers::TcpListenerStream::new(listener);
         let mut incoming = tokio_rustls_acme::AcmeConfig::new([fqdn])
-            .contact_push(args.tls.clone().unwrap())
+            .contact_push(format!("mailto:{}", mailto))
             .cache(tokio_rustls_acme::caches::DirCache::new(
                 "./rustls_acme_cache",
             ))
