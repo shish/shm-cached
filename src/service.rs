@@ -3,10 +3,11 @@ use http_body_util::Full;
 use hyper::body::Bytes;
 use hyper::{Request, Response, StatusCode};
 use std::future::Future;
+use std::ops::Deref;
 use std::path::Path;
 use std::pin::Pin;
 use std::sync::atomic::Ordering;
-use std::time::{Duration, UNIX_EPOCH};
+use std::time::UNIX_EPOCH;
 // use tower_http::trace::TraceLayer;
 
 use crate::stats::GlobalStats;
@@ -44,17 +45,13 @@ impl App {
             Ok(Response::builder().body(fb(s)).unwrap())
         }
 
-        tracing::info!("req = {:?}", req);
+        tracing::debug!("req = {:?}", req);
         let res = match req.uri().path() {
             // "/" => mk_response(format!("home! counter = {:?}", 42)),
             "/robots.txt" => mk_response(format!("User-agent: *\nDisallow: /_thumbs/\nAllow: /\n")),
             "/stats.json" => {
                 let global_stats = self.locked_stats.read().await;
-                let stats: HashMap<String, Arc<crate::stats::Stats>> = global_stats
-                    .iter()
-                    .map(|(k, v)| { (k.clone(), v.clone()) })
-                    .collect();
-                mk_response(serde_json::to_string(&stats).unwrap())
+                mk_response(serde_json::to_string(&global_stats.deref()).unwrap())
             }
             _ => {
                 let parts = req.uri().path().split('/').collect::<Vec<&str>>();
@@ -141,8 +138,8 @@ async fn handle_request_inner(
                 let target = format!("https://holly.paheal.net/_thumbs/{}/thumb.jpg", hash);
                 return Ok(Response::builder()
                     .status(StatusCode::TEMPORARY_REDIRECT)
-                    .header(http::header::LOCATION, target)
-                    .body(fb(""))
+                    .header(http::header::LOCATION, &target)
+                    .body(fb(format!("Redirecting to thumb {}", target)))
                     .unwrap());
             } else {
                 stats.external.fetch_add(1, Ordering::SeqCst);
@@ -159,7 +156,7 @@ async fn handle_request_inner(
             None => {
                 return Ok(Response::builder()
                     .status(StatusCode::NOT_FOUND)
-                    .body(fb("Not Found"))
+                    .body(fb(format!("Silo {} not found", silo)))
                     .unwrap());
             }
         }
@@ -188,8 +185,7 @@ async fn handle_request_inner(
             if let Err(x) = fs::remove_file(&path).await {
                 error!("Failed to remove {:?}: {}", path, x);
             }
-            let mut stats = locked_stats.write().await;
-            stats.cleaned += 1;
+            stats.cleaned.fetch_add(1, Ordering::SeqCst);
         }
         */
 
@@ -199,8 +195,8 @@ async fn handle_request_inner(
         stats.redirect.fetch_add(1, Ordering::SeqCst);
         return Ok(Response::builder()
             .status(StatusCode::TEMPORARY_REDIRECT)
-            .header(http::header::LOCATION, target)
-            .body(fb(""))
+            .header(http::header::LOCATION, &target)
+            .body(fb(format!("Redirecting to real owner {}", target)))
             .unwrap());
     }
 
@@ -209,10 +205,9 @@ async fn handle_request_inner(
     // ================================================================
     if path.exists() {
         stats.block_disk.fetch_add(1, Ordering::SeqCst);
-        let mtime_secs = utime::get_file_times(&path).unwrap().1;
-        let mtime = UNIX_EPOCH + Duration::from_secs(mtime_secs as u64);
-        let body = tokio::fs::read(&path).await.unwrap();
+        let maybe_mtime_body = fetch_file(&path).await;
         stats.block_disk.fetch_sub(1, Ordering::SeqCst);
+        let (mtime, body) = maybe_mtime_body?;
 
         stats.hits.fetch_add(1, Ordering::SeqCst);
 
@@ -229,14 +224,15 @@ async fn handle_request_inner(
     // If we own this image and it's missing, fetch it
     // ================================================================
     stats.block_net.fetch_add(1, Ordering::SeqCst);
-    let mut res = fetch_url(url).await?;
+    let res = fetch_url(url.clone()).await;
     stats.block_net.fetch_sub(1, Ordering::SeqCst);
+    let mut res = res?;
 
     if res.status() != StatusCode::OK {
         stats.missing.fetch_add(1, Ordering::SeqCst);
         return Ok(Response::builder()
             .status(StatusCode::NOT_FOUND)
-            .body(fb("Not Found"))
+            .body(fb(format!("{} not found", url)))
             .unwrap());
     }
 
@@ -248,7 +244,6 @@ async fn handle_request_inner(
             .unwrap(),
     )
     .unwrap();
-    // let body = hyper::body::to_bytes(res).await.unwrap();
     let mut body = Vec::new();
     while let Some(next) = res.frame().await {
         let frame = next?;
@@ -303,4 +298,10 @@ async fn fetch_url(url: hyper::Uri) -> Result<hyper::Response<hyper::body::Incom
         .unwrap();
 
     return Ok(sender.send_request(req).await?);
+}
+
+async fn fetch_file(path: &std::path::PathBuf) -> Result<(std::time::SystemTime, Vec<u8>)> {
+    let mtime = tokio::fs::metadata(&path).await?.modified()?;
+    let body = tokio::fs::read(&path).await?;
+    Ok((mtime, body))
 }

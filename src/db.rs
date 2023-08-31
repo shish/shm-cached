@@ -45,14 +45,8 @@ pub async fn spawn_db_listener(
 
     {
         let mut stats = locked_stats.write().await;
-        stats.insert(
-            "_thumbs".to_string(),
-            Arc::new(Stats::default()),
-        );
-        stats.insert(
-            "_images".to_string(),
-            Arc::new(Stats::default()),
-        );
+        stats.insert("_thumbs".to_string(), Arc::new(Stats::default()));
+        stats.insert("_images".to_string(), Arc::new(Stats::default()));
     }
 
     db.query("LISTEN shm_image_bans", &[]).await?;

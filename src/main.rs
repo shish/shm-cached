@@ -1,20 +1,20 @@
 use anyhow::Result;
 use clap::Parser;
-use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
-use std::sync::Arc;
 use flexihash::Flexihash;
 use std::collections::HashMap;
+use std::sync::Arc;
 use tokio::sync::RwLock;
+use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 mod db;
 mod service;
 mod stats;
 mod tcp;
 
+use crate::db::spawn_db_listener;
 use crate::service::App;
 use crate::stats::{spawn_summary, GlobalStats};
-use crate::db::spawn_db_listener;
-use crate::tcp::{tcp_server,tls_server};
+use crate::tcp::{tcp_server, tls_server};
 
 // HTTP cache optimised for Shimmie galleries
 #[derive(Parser, Clone)]
@@ -115,7 +115,8 @@ async fn main() -> Result<()> {
         &args.cache,
         locked_silos.clone(),
         locked_stats.clone(),
-    ).await?;
+    )
+    .await?;
 
     let app = App {
         name: name.clone(),
@@ -145,10 +146,8 @@ fn drop_privs(user: &Option<String>) -> Result<()> {
     Ok(())
 }
 
-async fn await_all(
-    servers: Vec<Option<tokio::task::JoinHandle<()>>>,
-) -> Result<()> {
-    let servers: Vec<_> = servers.into_iter().filter_map(|x| {x}).collect();
+async fn await_all(servers: Vec<Option<tokio::task::JoinHandle<()>>>) -> Result<()> {
+    let servers: Vec<_> = servers.into_iter().filter_map(|x| x).collect();
     if servers.is_empty() {
         return Err(anyhow::anyhow!(
             "No listener provided, use -p and / or -s for HTTP or HTTPS listener"

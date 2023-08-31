@@ -20,7 +20,11 @@ pub async fn tcp_server(args: &Args, app: App) -> Result<Option<tokio::task::Joi
     }
 }
 
-pub async fn tls_server(args: &Args, app: App, fqdn: &String) -> Result<Option<tokio::task::JoinHandle<()>>> {
+pub async fn tls_server(
+    args: &Args,
+    app: App,
+    fqdn: &String,
+) -> Result<Option<tokio::task::JoinHandle<()>>> {
     if let Some(sport) = args.sport {
         let https_addr = std::net::SocketAddr::from((args.address, sport));
         let listener = tokio::net::TcpListener::bind(https_addr).await?;
@@ -44,9 +48,7 @@ pub async fn tls_server(args: &Args, app: App, fqdn: &String) -> Result<Option<t
     }
 }
 
-fn serve_stream<
-    T: Unpin + tokio::io::AsyncRead + tokio::io::AsyncWrite + Send + Sync + 'static,
->(
+fn serve_stream<T: Unpin + tokio::io::AsyncRead + tokio::io::AsyncWrite + Send + Sync + 'static>(
     io: hyper_util::rt::TokioIo<T>,
     app: App,
 ) -> anyhow::Result<()> {
@@ -60,7 +62,7 @@ fn serve_stream<
             .serve_connection(io, app)
             .await
         {
-            println!("Error serving connection: {:?}", err);
+            tracing::error!("Error serving connection: {:?}", err);
         }
     });
 

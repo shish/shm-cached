@@ -67,8 +67,7 @@ pub fn spawn_summary(name: &str, locked_global_stats: GlobalStats) {
                         + stats.misses.load(Ordering::SeqCst)
                         - stats.last_miss.load(Ordering::SeqCst);
                     let hitrate = if total > 0 {
-                        (stats.hits.load(Ordering::SeqCst)
-                            - stats.last_hit.load(Ordering::SeqCst))
+                        (stats.hits.load(Ordering::SeqCst) - stats.last_hit.load(Ordering::SeqCst))
                             * 100
                             / total
                     } else {
@@ -86,8 +85,12 @@ pub fn spawn_summary(name: &str, locked_global_stats: GlobalStats) {
                         .send_to(msg.as_bytes(), "127.0.0.1:8094")
                         .expect("failed to send message");
 
-                    stats.last_hit.store(stats.hits.load(Ordering::SeqCst), Ordering::SeqCst);
-                    stats.last_miss.store(stats.misses.load(Ordering::SeqCst), Ordering::SeqCst);
+                    stats
+                        .last_hit
+                        .store(stats.hits.load(Ordering::SeqCst), Ordering::SeqCst);
+                    stats
+                        .last_miss
+                        .store(stats.misses.load(Ordering::SeqCst), Ordering::SeqCst);
                     stats.last_hitrate.store(hitrate, Ordering::SeqCst);
                 }
             }
