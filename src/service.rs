@@ -232,7 +232,7 @@ async fn handle_request_inner(
         stats.missing.fetch_add(1, Ordering::SeqCst);
         return Ok(Response::builder()
             .status(StatusCode::NOT_FOUND)
-            .body(fb(format!("{} not found", url)))
+            .body(fb(format!("{}/{} not found upstream", silo, hash)))
             .unwrap());
     }
 
