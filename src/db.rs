@@ -8,7 +8,8 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 use tokio_postgres::{AsyncMessage, Client, NoTls};
 
-use crate::types::{GlobalSilos, GlobalStats, Stats};
+use crate::stats::{GlobalStats, Stats};
+use crate::GlobalSilos;
 
 /// Configure and spawn a future which will
 /// - query initial configs + banned images

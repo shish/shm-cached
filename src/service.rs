@@ -1,153 +1,123 @@
-use anyhow::Result;
-use axum::extract::Extension;
-use axum::http::header;
-use axum::http::header::HeaderMap;
-use axum::http::StatusCode;
-use axum::response::IntoResponse;
-use axum::routing::get;
-use axum::routing::IntoMakeService;
-use axum::Router;
-use hyper::client::Client;
-use std::collections::HashMap;
+use http_body_util::Full;
+use hyper::body::Bytes;
+use hyper::{Request, Response, StatusCode};
+use std::future::Future;
 use std::path::Path;
-use std::sync::Arc;
+use std::pin::Pin;
 use std::time::{Duration, UNIX_EPOCH};
-use tokio::fs;
-use tokio::sync::RwLock;
-use tower_http::trace::TraceLayer;
+use http_body_util::BodyExt;
+// use tower_http::trace::TraceLayer;
 
-use crate::db::spawn_db_listener;
-use crate::types::*;
+use crate::stats::GlobalStats;
+use crate::*;
 
-struct AppState {
-    name: String,
-    args: GlobalArgs,
-    locked_stats: GlobalStats,
-    locked_silos: GlobalSilos,
+#[derive(Clone)]
+pub struct App {
+    pub name: String,
+    pub args: GlobalArgs,
+    pub locked_stats: GlobalStats,
+    pub locked_silos: GlobalSilos,
 }
 
-pub async fn make_service(name: String, args: &Args) -> Result<IntoMakeService<Router<()>>> {
-    let arc_args = Arc::new(args.clone());
-    let silos = HashMap::new();
+impl hyper::service::Service<Request<hyper::body::Incoming>> for App {
+    type Response = Response<Full<Bytes>>;
+    type Error = anyhow::Error;
+    type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
 
-    let locked_stats = GlobalStats::default();
-    let locked_silos = Arc::new(RwLock::new(silos));
-
-    spawn_db_listener(
-        &args.dsn,
-        &name,
-        &args.cache,
-        locked_silos.clone(),
-        locked_stats.clone(),
-    )
-    .await?;
-    if !args.no_stats {
-        spawn_summary(&name, locked_stats.clone());
+    fn call(&self, req: Request<hyper::body::Incoming>) -> Self::Future {
+        let s2 = self.clone();
+        Box::pin(async move { s2.async_call(req).await })
     }
-
-    let app_state = Arc::new(AppState {
-        name: name.clone(),
-        args: arc_args,
-        locked_stats: locked_stats.clone(),
-        locked_silos: locked_silos.clone(),
-    });
-
-    let app: _ = Router::new()
-        // GET /robots.txt -> hard-coding which silos shouldn't be crawled
-        .route(
-            "/robots.txt",
-            get(|| async { "User-agent: *\nDisallow: /_thumbs/\nAllow: /\n" }),
-        )
-        // GET /<silo>/<hash>/<human> -> fetch from cache
-        .route("/:silo/:hash/:human", get(handle_request))
-        .layer(TraceLayer::new_for_http())
-        .layer(Extension(app_state));
-    Ok(app.into_make_service())
 }
 
-/// Spawn a separate future which will, every 10 seconds, send a bunch of
-/// UDP packets containing summaries of how many requests we've served
-fn spawn_summary(name: &str, locked_global_stats: GlobalStats) {
-    let name = name.to_string();
-    tokio::spawn(async move {
-        let socket = std::net::UdpSocket::bind("127.0.0.1:0").expect("failed to bind stats socket");
-        loop {
-            tokio::time::sleep(Duration::from_secs(10)).await;
-            {
-                for (silo, locked_stats) in locked_global_stats.read().await.iter() {
-                    let mut stats = locked_stats.write().await;
-                    let total = stats.hits - stats.last_hit + stats.misses - stats.last_miss;
-                    let hitrate = if total > 0 {
-                        (stats.hits - stats.last_hit) * 100 / total
-                    } else {
-                        stats.last_hitrate
-                    };
-                    let msg = format!(
-                        "shm_cached,name={},silo={} {},hitrate={}",
-                        name,
-                        silo,
-                        stats.to_string(),
-                        hitrate
-                    );
-                    tracing::debug!("{}", msg);
-                    socket
-                        .send_to(msg.as_bytes(), "127.0.0.1:8094")
-                        .expect("failed to send message");
+fn fb(data: impl Into<Bytes>) -> Full<Bytes> {
+    Full::new(Bytes::from(data.into()))
+}
 
-                    stats.last_hit = stats.hits;
-                    stats.last_miss = stats.misses;
-                    stats.last_hitrate = hitrate;
-                }
+impl App {
+    async fn async_call(
+        &self,
+        req: Request<hyper::body::Incoming>,
+    ) -> Result<Response<Full<Bytes>>> {
+        fn mk_response(s: String) -> Result<Response<Full<Bytes>>> {
+            Ok(Response::builder().body(fb(s)).unwrap())
+        }
+
+        tracing::info!("req = {:?}", req);
+        let res = match req.uri().path() {
+            // "/" => mk_response(format!("home! counter = {:?}", 42)),
+            "/robots.txt" => mk_response(format!("User-agent: *\nDisallow: /_thumbs/\nAllow: /\n")),
+            "/stats.json" => {
+                let global_stats = self.locked_stats.read().await;
+                let stats: HashMap<String, crate::stats::Stats> = futures::future::join_all(
+                    global_stats
+                        .iter()
+                        .map(|(k, v)| async move { (k.clone(), v.read().await.clone()) }),
+                )
+                .await
+                .into_iter()
+                .collect();
+                mk_response(serde_json::to_string(&stats).unwrap())
             }
-        }
-    });
-}
+            _ => {
+                let parts = req.uri().path().split('/').collect::<Vec<&str>>();
+                if parts.len() != 4 {
+                    return Ok(Response::builder()
+                        .status(StatusCode::NOT_FOUND)
+                        .body(fb("Bad Path"))
+                        .unwrap());
+                }
+                let silo = parts[1].to_string();
+                let hash = parts[2].to_string();
+                let human = parts[3].to_string();
 
-/// Increment in-progress counter, call inner request handler, decrement counter
-async fn handle_request(
-    axum::extract::Path((silo, hash, human)): axum::extract::Path<(String, String, String)>,
-    Extension(state): Extension<Arc<AppState>>,
-    headers: axum::http::header::HeaderMap,
-) -> Result<impl IntoResponse, (StatusCode, String)> {
-    let global_stats = state.locked_stats.read().await;
-    let locked_stats = match global_stats.get(&silo) {
-        Some(s) => s,
-        None => {
-            return Err((StatusCode::NOT_FOUND, "Not Found".to_string()));
-        }
-    };
+                let global_stats = self.locked_stats.read().await;
+                let locked_stats = match global_stats.get(&silo) {
+                    Some(s) => s,
+                    None => {
+                        return Ok(Response::builder()
+                            .status(StatusCode::NOT_FOUND)
+                            .body(fb("Not Found"))
+                            .unwrap());
+                    }
+                };
 
-    {
-        let mut stats = locked_stats.write().await;
-        stats.inflight += 1;
+                {
+                    let mut stats = locked_stats.write().await;
+                    stats.inflight += 1;
+                }
+
+                let referer = if req.headers().contains_key(http::header::REFERER) {
+                    Some(
+                        req.headers()[http::header::REFERER]
+                            .to_str()
+                            .unwrap()
+                            .to_string(),
+                    )
+                } else {
+                    None
+                };
+                let ret = handle_request_inner(
+                    silo,
+                    hash,
+                    human,
+                    self.args.clone(),
+                    locked_stats.clone(),
+                    self.locked_silos.clone(),
+                    self.name.clone(),
+                    referer,
+                )
+                .await;
+                {
+                    let mut stats = locked_stats.write().await;
+                    stats.inflight -= 1;
+                }
+                ret
+            }
+        };
+
+        res
     }
-
-    let referer = if headers.contains_key(axum::http::header::REFERER) {
-        Some(
-            headers[axum::http::header::REFERER]
-                .to_str()
-                .unwrap()
-                .to_string(),
-        )
-    } else {
-        None
-    };
-    let ret = handle_request_inner(
-        silo,
-        hash,
-        human,
-        state.args.clone(),
-        locked_stats.clone(),
-        state.locked_silos.clone(),
-        state.name.clone(),
-        referer,
-    )
-    .await;
-    {
-        let mut stats = locked_stats.write().await;
-        stats.inflight -= 1;
-    }
-    Ok(ret)
 }
 
 async fn handle_request_inner(
@@ -155,11 +125,11 @@ async fn handle_request_inner(
     hash: String,
     human: String,
     args: GlobalArgs,
-    locked_stats: Arc<RwLock<Stats>>,
+    locked_stats: Arc<RwLock<crate::stats::Stats>>,
     locked_silos: GlobalSilos,
     me: String,
     referer: Option<String>,
-) -> Result<impl IntoResponse, (StatusCode, String)> {
+) -> Result<Response<Full<Bytes>>> {
     {
         let mut stats = locked_stats.write().await;
         stats.requests += 1;
@@ -182,9 +152,11 @@ async fn handle_request_inner(
             } else if referer.contains("google") {
                 stats.google += 1;
                 let target = format!("https://holly.paheal.net/_thumbs/{}/thumb.jpg", hash);
-                let mut header_map = HeaderMap::new();
-                header_map.insert(header::LOCATION, target.parse().unwrap());
-                return Ok((StatusCode::TEMPORARY_REDIRECT, header_map, vec![]));
+                return Ok(Response::builder()
+                    .status(StatusCode::TEMPORARY_REDIRECT)
+                    .header(http::header::LOCATION, target)
+                    .body(fb(""))
+                    .unwrap());
             } else {
                 stats.external += 1;
             }
@@ -198,7 +170,10 @@ async fn handle_request_inner(
         match silos.get(&silo) {
             Some(s) => s.lookup_list(&hash, 2),
             None => {
-                return Err((StatusCode::NOT_FOUND, "Not Found".to_string()));
+                return Ok(Response::builder()
+                    .status(StatusCode::NOT_FOUND)
+                    .body(fb("Not Found"))
+                    .unwrap());
             }
         }
     };
@@ -212,6 +187,7 @@ async fn handle_request_inner(
         .join(&silo)
         .join(&hash)
         .join("human.jpg");
+    let url = url.to_string_lossy().parse::<hyper::Uri>().unwrap();
 
     // ================================================================
     // If we don't own this image, redirect to the owner
@@ -235,9 +211,11 @@ async fn handle_request_inner(
 
         let mut stats = locked_stats.write().await;
         stats.redirect += 1;
-        let mut header_map = HeaderMap::new();
-        header_map.insert(header::LOCATION, target.parse().unwrap());
-        return Ok((StatusCode::TEMPORARY_REDIRECT, header_map, vec![]));
+        return Ok(Response::builder()
+            .status(StatusCode::TEMPORARY_REDIRECT)
+            .header(http::header::LOCATION, target)
+            .body(fb(""))
+            .unwrap());
     }
 
     // ================================================================
@@ -250,7 +228,7 @@ async fn handle_request_inner(
         }
         let mtime_secs = utime::get_file_times(&path).unwrap().1;
         let mtime = UNIX_EPOCH + Duration::from_secs(mtime_secs as u64);
-        let body = fs::read(&path).await.unwrap();
+        let body = tokio::fs::read(&path).await.unwrap();
         {
             let mut stats = locked_stats.write().await;
             stats.block_disk -= 1;
@@ -259,17 +237,13 @@ async fn handle_request_inner(
         let mut stats = locked_stats.write().await;
         stats.hits += 1;
 
-        let mut header_map = HeaderMap::new();
-        header_map.insert(header::CONTENT_TYPE, content_type.parse().unwrap());
-        header_map.insert(
-            header::LAST_MODIFIED,
-            httpdate::fmt_http_date(mtime).parse().unwrap(),
-        );
-        header_map.insert(
-            header::CACHE_CONTROL,
-            "public, max-age=31556926".parse().unwrap(),
-        );
-        return Ok((StatusCode::OK, header_map, body));
+        return Ok(Response::builder()
+            .status(StatusCode::OK)
+            .header(http::header::CONTENT_TYPE, content_type)
+            .header(http::header::LAST_MODIFIED, httpdate::fmt_http_date(mtime))
+            .header(http::header::CACHE_CONTROL, "public, max-age=31556926")
+            .body(fb(body))
+            .unwrap());
     }
 
     // ================================================================
@@ -279,11 +253,7 @@ async fn handle_request_inner(
         let mut stats = locked_stats.write().await;
         stats.block_net += 1;
     }
-    let client = Client::new();
-    let res = client
-        .get(url.to_str().unwrap().parse().unwrap())
-        .await
-        .unwrap();
+    let mut res = fetch_url(url).await?;
     {
         let mut stats = locked_stats.write().await;
         stats.block_net -= 1;
@@ -292,20 +262,29 @@ async fn handle_request_inner(
     if res.status() != StatusCode::OK {
         let mut stats = locked_stats.write().await;
         stats.missing += 1;
-        return Err((StatusCode::NOT_FOUND, "Not Found".to_string()));
+        return Ok(Response::builder()
+            .status(StatusCode::NOT_FOUND)
+            .body(fb("Not Found"))
+            .unwrap());
     }
 
-    let headers = res.headers();
     let mtime =
-        httpdate::parse_http_date(headers.get("last-modified").unwrap().to_str().unwrap()).unwrap();
-    let body = hyper::body::to_bytes(res).await.unwrap();
+        httpdate::parse_http_date(res.headers().get(http::header::LAST_MODIFIED).unwrap().to_str().unwrap()).unwrap();
+    // let body = hyper::body::to_bytes(res).await.unwrap();
+    let mut body = Vec::new();
+    while let Some(next) = res.frame().await {
+        let frame = next?;
+        if let Some(chunk) = frame.data_ref() {
+            body.extend_from_slice(chunk);
+        }
+    }
 
     let body_to_write = body.clone();
     tokio::spawn(async move {
-        fs::create_dir_all(path.parent().unwrap())
+        tokio::fs::create_dir_all(path.parent().unwrap())
             .await
             .expect("Failed to create parent dir");
-        fs::write(&path, &body_to_write)
+        tokio::fs::write(&path, &body_to_write)
             .await
             .expect("Failed to write file");
         let mtime_secs = mtime.duration_since(UNIX_EPOCH).unwrap().as_secs() as i64;
@@ -315,15 +294,36 @@ async fn handle_request_inner(
     let mut stats = locked_stats.write().await;
     stats.misses += 1;
 
-    let mut header_map = HeaderMap::new();
-    header_map.insert(header::CONTENT_TYPE, content_type.parse().unwrap());
-    header_map.insert(
-        header::LAST_MODIFIED,
-        httpdate::fmt_http_date(mtime).parse().unwrap(),
-    );
-    header_map.insert(
-        header::CACHE_CONTROL,
-        "public, max-age=31556926".parse().unwrap(),
-    );
-    Ok((StatusCode::OK, header_map, body.into()))
+    return Ok(Response::builder()
+        .status(StatusCode::OK)
+        .header(http::header::CONTENT_TYPE, content_type)
+        .header(http::header::LAST_MODIFIED, httpdate::fmt_http_date(mtime))
+        .header(http::header::CACHE_CONTROL, "public, max-age=31556926")
+        .body(fb(body))
+        .unwrap());
+}
+
+async fn fetch_url(url: hyper::Uri) -> Result<hyper::Response<hyper::body::Incoming>> {
+    let host = url.host().expect("uri has no host");
+    let port = url.port_u16().unwrap_or(80);
+    let addr = format!("{}:{}", host, port);
+    let stream = tokio::net::TcpStream::connect(addr).await?;
+    let io = hyper_util::rt::TokioIo::new(stream);
+
+    let (mut sender, conn) = hyper::client::conn::http1::handshake(io).await?;
+    tokio::task::spawn(async move {
+        if let Err(err) = conn.await {
+            tracing::error!("Connection failed: {:?}", err);
+        }
+    });
+
+    let authority = url.authority().unwrap().clone();
+
+    let req = Request::builder()
+        .uri(url)
+        .header(hyper::header::HOST, authority.as_str())
+        .body(http_body_util::Empty::<Bytes>::new())
+        .unwrap();
+
+    return Ok(sender.send_request(req).await?);
 }

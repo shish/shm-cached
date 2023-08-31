@@ -1,18 +1,76 @@
 use anyhow::Result;
 use clap::Parser;
-use rustls::ServerConfig;
-use rustls_acme::caches::DirCache;
-use rustls_acme::AcmeConfig;
-use std::sync::Arc;
-use tokio_stream::StreamExt;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
+use std::sync::Arc;
+use flexihash::Flexihash;
+use std::collections::HashMap;
+use tokio::sync::RwLock;
 
 mod db;
 mod service;
-mod types;
+mod stats;
+mod tcp;
 
-use crate::service::make_service;
-use crate::types::*;
+use crate::service::App;
+use crate::stats::{spawn_summary, GlobalStats};
+use crate::db::spawn_db_listener;
+use crate::tcp::{tcp_server,tls_server};
+
+// HTTP cache optimised for Shimmie galleries
+#[derive(Parser, Clone)]
+#[clap(author, about, long_about = None)]
+pub struct Args {
+    /// Where the cached files should be stored
+    #[clap(short = 'c', default_value = "/data/shm_cache/")]
+    pub cache: String,
+
+    /// Where we should fetch files if we don't have a local copy
+    #[clap(short = 'b', default_value = "http://localhost:81")]
+    pub backend: String,
+
+    /// Where should we find our load balancer settings
+    #[clap(short = 'd', default_value = "user=test host=localhost")]
+    pub dsn: String,
+
+    /// User to switch to after binding sockets
+    #[clap(short = 'u')]
+    pub user: Option<String>,
+
+    /// This host's name for consistent hash lookups
+    #[clap(short = 'n')]
+    pub name: Option<String>,
+
+    /// IP address to bind to
+    #[clap(short = 'a', default_value = "0.0.0.0")]
+    pub address: std::net::IpAddr,
+
+    /// HTTP Port
+    #[clap(short = 'p')]
+    pub port: Option<u16>,
+
+    /// HTTPS Port
+    #[clap(short = 's')]
+    pub sport: Option<u16>,
+
+    /// Contact email address for HTTPS certificates
+    #[clap(short = 't')]
+    pub tls: Option<String>,
+
+    /// This host's FQDN for HTTPS certificates
+    #[clap(short = 'f')]
+    pub fqdn: Option<String>,
+
+    /// Don't send stats to dashboards
+    #[clap(long = "no-stats")]
+    pub no_stats: bool,
+
+    /// Show version
+    #[structopt(long = "version")]
+    pub version: bool,
+}
+
+pub type GlobalArgs = Arc<Args>;
+pub type GlobalSilos = Arc<RwLock<HashMap<String, Flexihash>>>;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -45,69 +103,33 @@ async fn main() -> Result<()> {
         return Ok(());
     }
 
-    let service = make_service(name, &args).await?;
+    let locked_stats = GlobalStats::default();
+    if !args.no_stats {
+        spawn_summary(&name, locked_stats.clone());
+    }
 
-    let http = if let Some(port) = args.port {
-        let http_addr = std::net::SocketAddr::from((args.address, port));
-        tracing::debug!("listening on {}", http_addr);
-        Some(axum_server::bind(http_addr).serve(service.clone()))
-    } else {
-        None
+    let locked_silos = GlobalSilos::default();
+    spawn_db_listener(
+        &args.dsn,
+        &name,
+        &args.cache,
+        locked_silos.clone(),
+        locked_stats.clone(),
+    ).await?;
+
+    let app = App {
+        name: name.clone(),
+        args: Arc::new(args.clone()),
+        locked_stats: locked_stats.clone(),
+        locked_silos: locked_silos.clone(),
     };
 
-    let https = if let (Some(sport), Some(tls)) = (args.sport, args.tls.clone()) {
-        // Let's Encrypt support
-        let acceptor = {
-            let mut state = AcmeConfig::new([fqdn])
-                .contact([format!("mailto:{}", tls)])
-                .cache_option(Some(DirCache::new(format!("{}/.tls", args.cache))))
-                .directory_lets_encrypt(true)
-                .state();
-            let rustls_config = ServerConfig::builder()
-                .with_safe_defaults()
-                .with_no_client_auth()
-                .with_cert_resolver(state.resolver());
-            let acceptor = state.axum_acceptor(Arc::new(rustls_config));
-            tokio::spawn(async move {
-                loop {
-                    match state.next().await.unwrap() {
-                        Ok(ok) => tracing::info!("acme event: {:?}", ok),
-                        Err(err) => tracing::error!("acme error: {:?}", err),
-                    }
-                }
-            });
-            acceptor
-        };
-
-        let https_addr = std::net::SocketAddr::from((args.address, sport));
-        tracing::debug!("listening on {}", https_addr);
-        Some(
-            axum_server::bind(https_addr)
-                .acceptor(acceptor)
-                .serve(service.clone()),
-        )
-    } else {
-        None
-    };
+    let http = tcp_server(&args, app.clone()).await?;
+    let https = tls_server(&args, app.clone(), &fqdn).await?;
 
     drop_privs(&args.user)?;
 
-    match (http, https) {
-        (Some(http), Some(https)) => {
-            let _ = futures::future::join(http, https).await;
-        }
-        (Some(http), None) => {
-            http.await?;
-        }
-        (None, Some(https)) => {
-            https.await?;
-        }
-        (None, None) => {
-            return Err(anyhow::anyhow!(
-                "No listener provided, use -p and / or -s for HTTP or HTTPS listener"
-            ));
-        }
-    }
+    await_all(vec![http, https]).await?;
 
     Ok(())
 }
@@ -120,5 +142,18 @@ fn drop_privs(user: &Option<String>) -> Result<()> {
             .user(user)
             .apply()?;
     }
+    Ok(())
+}
+
+async fn await_all(
+    servers: Vec<Option<tokio::task::JoinHandle<()>>>,
+) -> Result<()> {
+    let servers: Vec<_> = servers.into_iter().filter_map(|x| {x}).collect();
+    if servers.is_empty() {
+        return Err(anyhow::anyhow!(
+            "No listener provided, use -p and / or -s for HTTP or HTTPS listener"
+        ));
+    }
+    let _ = futures::future::join_all(servers).await;
     Ok(())
 }
