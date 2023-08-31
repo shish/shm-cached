@@ -29,11 +29,10 @@ pub async fn tls_server(
         let https_addr = std::net::SocketAddr::from((args.address, sport));
         let listener = tokio::net::TcpListener::bind(https_addr).await?;
         let incoming = tokio_stream::wrappers::TcpListenerStream::new(listener);
+        let cache = tokio_rustls_acme::caches::DirCache::new(format!("{}/.tls", args.cache));
         let mut incoming = tokio_rustls_acme::AcmeConfig::new([fqdn])
             .contact_push(format!("mailto:{}", mailto))
-            .cache(tokio_rustls_acme::caches::DirCache::new(
-                "./rustls_acme_cache",
-            ))
+            .cache(cache)
             .incoming(incoming, Vec::new());
 
         tracing::info!("Listening on https://{}", https_addr);
