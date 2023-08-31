@@ -33,6 +33,7 @@ pub async fn tls_server(
         let mut incoming = tokio_rustls_acme::AcmeConfig::new([fqdn])
             .contact_push(format!("mailto:{}", mailto))
             .cache(cache)
+            .directory_lets_encrypt(true)
             .incoming(incoming, Vec::new());
 
         tracing::info!("Listening on https://{}", https_addr);
