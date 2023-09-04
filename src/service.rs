@@ -41,17 +41,14 @@ impl App {
         &self,
         req: Request<hyper::body::Incoming>,
     ) -> Result<Response<Full<Bytes>>> {
-        fn mk_response(s: String) -> Result<Response<Full<Bytes>>> {
-            Ok(Response::builder().body(fb(s)).unwrap())
-        }
-
-        tracing::debug!("req = {:?}", req);
         let res = match req.uri().path() {
-            // "/" => mk_response(format!("home! counter = {:?}", 42)),
-            "/robots.txt" => mk_response(format!("User-agent: *\nDisallow: /_thumbs/\nAllow: /\n")),
+            "/robots.txt" => Ok(Response::builder()
+                .body(fb("User-agent: *\nDisallow: /_thumbs/\nAllow: /\n"))
+                .unwrap()),
             "/stats.json" => {
                 let global_stats = self.locked_stats.read().await;
-                mk_response(serde_json::to_string(&global_stats.deref()).unwrap())
+                let data = serde_json::to_string(&global_stats.deref()).unwrap();
+                Ok(Response::builder().body(fb(data)).unwrap())
             }
             _ => {
                 let parts = req.uri().path().split('/').collect::<Vec<&str>>();
@@ -201,78 +198,73 @@ async fn handle_request_inner(
     }
 
     // ================================================================
-    // If we own this image and it's on disk, serve it
+    // If we own this image and it's on disk, fetch from disk
     // ================================================================
-    if path.exists() {
+    let (mtime, body) = if path.exists() {
         stats.block_disk.fetch_add(1, Ordering::SeqCst);
         let maybe_mtime_body = fetch_file(&path).await;
         stats.block_disk.fetch_sub(1, Ordering::SeqCst);
-        let (mtime, body) = maybe_mtime_body?;
 
         stats.hits.fetch_add(1, Ordering::SeqCst);
-
-        return Ok(Response::builder()
-            .status(StatusCode::OK)
-            .header(http::header::CONTENT_TYPE, content_type)
-            .header(http::header::LAST_MODIFIED, httpdate::fmt_http_date(mtime))
-            .header(http::header::CACHE_CONTROL, "public, max-age=31556926")
-            .body(fb(body))
-            .unwrap());
+        maybe_mtime_body?
     }
-
     // ================================================================
-    // If we own this image and it's missing, fetch it
+    // If we own this image and it's missing, fetch from upstream
     // ================================================================
-    stats.block_net.fetch_add(1, Ordering::SeqCst);
-    let res = fetch_url(url.clone()).await;
-    stats.block_net.fetch_sub(1, Ordering::SeqCst);
-    let mut res = res?;
+    else {
+        stats.block_net.fetch_add(1, Ordering::SeqCst);
+        let res = fetch_url(url.clone()).await;
+        stats.block_net.fetch_sub(1, Ordering::SeqCst);
+        let mut res = res?;
 
-    if res.status() != StatusCode::OK {
-        stats.missing.fetch_add(1, Ordering::SeqCst);
-        return Ok(Response::builder()
-            .status(StatusCode::NOT_FOUND)
-            .body(fb(format!("{}/{} not found upstream", silo, hash)))
-            .unwrap());
-    }
-
-    let mtime = httpdate::parse_http_date(
-        res.headers()
-            .get(http::header::LAST_MODIFIED)
-            .unwrap()
-            .to_str()
-            .unwrap(),
-    )
-    .unwrap();
-    let mut body = Vec::new();
-    while let Some(next) = res.frame().await {
-        let frame = next?;
-        if let Some(chunk) = frame.data_ref() {
-            body.extend_from_slice(chunk);
+        if res.status() != StatusCode::OK {
+            stats.missing.fetch_add(1, Ordering::SeqCst);
+            return Ok(Response::builder()
+                .status(StatusCode::NOT_FOUND)
+                .body(fb(format!("{}/{} not found upstream", silo, hash)))
+                .unwrap());
         }
-    }
 
-    let body_to_write = body.clone();
-    tokio::spawn(async move {
-        tokio::fs::create_dir_all(path.parent().unwrap())
-            .await
-            .expect("Failed to create parent dir");
-        tokio::fs::write(&path, &body_to_write)
-            .await
-            .expect("Failed to write file");
-        let mtime_secs = mtime.duration_since(UNIX_EPOCH).unwrap().as_secs() as i64;
-        utime::set_file_times(&path, mtime_secs, mtime_secs).expect("Failed to set mtime");
-    });
+        let mtime = httpdate::parse_http_date(
+            res.headers()
+                .get(http::header::LAST_MODIFIED)
+                .unwrap()
+                .to_str()
+                .unwrap(),
+        )
+        .unwrap();
+        let mut body = Vec::new();
+        while let Some(next) = res.frame().await {
+            let frame = next?;
+            if let Some(chunk) = frame.data_ref() {
+                body.extend_from_slice(chunk);
+            }
+        }
 
-    stats.misses.fetch_add(1, Ordering::SeqCst);
+        let body_to_write = body.clone();
+        tokio::spawn(async move {
+            tokio::fs::create_dir_all(path.parent().unwrap())
+                .await
+                .expect("Failed to create parent dir");
+            tokio::fs::write(&path, &body_to_write)
+                .await
+                .expect("Failed to write file");
+            let mtime_secs = mtime.duration_since(UNIX_EPOCH).unwrap().as_secs() as i64;
+            utime::set_file_times(&path, mtime_secs, mtime_secs).expect("Failed to set mtime");
+        });
 
-    return Ok(Response::builder()
+        stats.misses.fetch_add(1, Ordering::SeqCst);
+
+        (mtime, body)
+    };
+
+    Ok(Response::builder()
         .status(StatusCode::OK)
         .header(http::header::CONTENT_TYPE, content_type)
         .header(http::header::LAST_MODIFIED, httpdate::fmt_http_date(mtime))
         .header(http::header::CACHE_CONTROL, "public, max-age=31556926")
         .body(fb(body))
-        .unwrap());
+        .unwrap())
 }
 
 async fn fetch_url(url: hyper::Uri) -> Result<hyper::Response<hyper::body::Incoming>> {
