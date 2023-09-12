@@ -97,7 +97,7 @@ impl hyper::service::Service<Request<hyper::body::Incoming>> for App {
 }
 
 fn fb(data: impl Into<Bytes>) -> Full<Bytes> {
-    Full::new(Bytes::from(data.into()))
+    Full::new(data.into())
 }
 
 impl App {
@@ -107,12 +107,11 @@ impl App {
     ) -> Result<Response<Full<Bytes>>> {
         let res = match req.uri().path() {
             "/robots.txt" => Ok(Response::builder()
-                .body(fb("User-agent: *\nDisallow: /_thumbs/\nAllow: /\n"))
-                .unwrap()),
+                .body(fb("User-agent: *\nDisallow: /_thumbs/\nAllow: /\n"))?),
             "/stats.json" => {
                 let global_stats = self.locked_stats.read().await;
-                let data = serde_json::to_string(&global_stats.deref()).unwrap();
-                Ok(Response::builder().body(fb(data)).unwrap())
+                let data = serde_json::to_string(&global_stats.deref())?;
+                Ok(Response::builder().body(fb(data))?)
             }
             path => cache_request(
                 &self.name,

@@ -51,7 +51,7 @@ pub async fn spawn_db_listener(
 
     db.query("LISTEN shm_image_bans", &[]).await?;
 
-    clean_all(&db, &cache, &locked_silos).await?;
+    clean_all(&db, cache, &locked_silos).await?;
 
     let cache = cache.to_string();
     tokio::spawn(async move {
@@ -123,7 +123,7 @@ async fn clean_all(db: &Client, cache: &str, locked_silos: &GlobalSilos) -> Resu
         .await?;
     for row in existing_bans {
         let hash = row.get(0);
-        clean(cache, &locked_silos, hash).await;
+        clean(cache, locked_silos, hash).await;
     }
 
     Ok(())

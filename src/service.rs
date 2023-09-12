@@ -58,7 +58,7 @@ async fn handle_request_inner(
     human: String,
     args: &Args,
     stats: &Arc<crate::stats::Stats>,
-    owners: &Vec<String>,
+    owners: &[String],
     me: &String,
     referer: Option<&str>,
 ) -> Result<CacheResult> {
@@ -126,7 +126,7 @@ async fn handle_request_inner(
     // ================================================================
     // If we own this image and it's on disk, fetch from disk
     // ================================================================
-    return if path.exists() {
+    if path.exists() {
         stats.block_disk.fetch_add(1, Ordering::SeqCst);
         let maybe_mtime_body = fetch_file(&path).await;
         stats.block_disk.fetch_sub(1, Ordering::SeqCst);
@@ -153,10 +153,8 @@ async fn handle_request_inner(
             res.headers()
                 .get(http::header::LAST_MODIFIED)
                 .unwrap()
-                .to_str()
-                .unwrap(),
-        )
-        .unwrap();
+                .to_str()?,
+        )?;
         let mut body = Vec::new();
         while let Some(next) = res.frame().await {
             let frame = next?;
@@ -180,7 +178,7 @@ async fn handle_request_inner(
         stats.misses.fetch_add(1, Ordering::SeqCst);
 
         Ok(CacheResult::Miss(content_type, mtime, body))
-    };
+    }
 }
 
 async fn fetch_url(url: hyper::Uri) -> Result<hyper::Response<hyper::body::Incoming>> {
@@ -202,10 +200,9 @@ async fn fetch_url(url: hyper::Uri) -> Result<hyper::Response<hyper::body::Incom
     let req = Request::builder()
         .uri(url)
         .header(hyper::header::HOST, authority.as_str())
-        .body(http_body_util::Empty::<Bytes>::new())
-        .unwrap();
+        .body(http_body_util::Empty::<Bytes>::new())?;
 
-    return Ok(sender.send_request(req).await?);
+    Ok(sender.send_request(req).await?)
 }
 
 async fn fetch_file(path: &std::path::PathBuf) -> Result<(std::time::SystemTime, Vec<u8>)> {

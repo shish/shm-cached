@@ -77,7 +77,7 @@ pub fn spawn_summary(name: &str, locked_global_stats: GlobalStats) {
                         "shm_cached,name={},silo={} {},hitrate={}",
                         name,
                         silo,
-                        stats.to_string(),
+                        stats,
                         hitrate
                     );
                     tracing::debug!("{}", msg);

@@ -147,7 +147,7 @@ fn drop_privs(user: &Option<String>) -> Result<()> {
 }
 
 async fn await_all(servers: Vec<Option<tokio::task::JoinHandle<()>>>) -> Result<()> {
-    let servers: Vec<_> = servers.into_iter().filter_map(|x| x).collect();
+    let servers: Vec<_> = servers.into_iter().flatten().collect();
     if servers.is_empty() {
         return Err(anyhow::anyhow!(
             "No listener provided, use -p and / or -s for HTTP or HTTPS listener"
