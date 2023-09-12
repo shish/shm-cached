@@ -94,7 +94,7 @@ async fn populate_silo(
     let targets: &str = rows[0].get(0);
 
     let parts: Vec<&str> = targets.split(|c| c == '{' || c == '}').collect();
-    let targets = parts.get(1).unwrap();
+    let targets = parts.get(1).ok_or(anyhow::anyhow!("Invalid silo config: {}", targets))?;
     tracing::info!("{} -> {}", name, targets);
 
     let mut fh = Flexihash::new();

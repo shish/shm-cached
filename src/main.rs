@@ -12,8 +12,8 @@ mod stats;
 mod tcp;
 
 use crate::db::spawn_db_listener;
-use crate::service::App;
 use crate::stats::{spawn_summary, GlobalStats};
+use crate::tcp::App;
 use crate::tcp::{tcp_server, tls_server};
 
 // HTTP cache optimised for Shimmie galleries

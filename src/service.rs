@@ -1,120 +1,67 @@
 use http_body_util::BodyExt;
-use http_body_util::Full;
 use hyper::body::Bytes;
-use hyper::{Request, Response, StatusCode};
-use std::future::Future;
+use hyper::{Request, StatusCode};
 use std::ops::Deref;
 use std::path::Path;
-use std::pin::Pin;
 use std::sync::atomic::Ordering;
 use std::time::UNIX_EPOCH;
 // use tower_http::trace::TraceLayer;
 
-use crate::stats::GlobalStats;
 use crate::*;
 
-#[derive(Clone)]
-pub struct App {
-    pub name: String,
-    pub args: GlobalArgs,
-    pub locked_stats: GlobalStats,
-    pub locked_silos: GlobalSilos,
+pub enum CacheResult {
+    Hit(&'static str, std::time::SystemTime, Vec<u8>),
+    Miss(&'static str, std::time::SystemTime, Vec<u8>),
+    Redirect(String),
+    NotFound,
 }
 
-impl hyper::service::Service<Request<hyper::body::Incoming>> for App {
-    type Response = Response<Full<Bytes>>;
-    type Error = anyhow::Error;
-    type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
-
-    fn call(&self, req: Request<hyper::body::Incoming>) -> Self::Future {
-        let s2 = self.clone();
-        Box::pin(async move { s2.async_call(req).await })
+pub async fn cache_request(
+    name: &String,
+    args: &Args,
+    path: &str,
+    referer: Option<&str>,
+    locked_silos: &GlobalSilos,
+    locked_stats: &GlobalStats,
+) -> Result<CacheResult> {
+    let parts = path.split('/').collect::<Vec<&str>>();
+    if parts.len() != 4 {
+        return Ok(CacheResult::NotFound);
     }
-}
-
-fn fb(data: impl Into<Bytes>) -> Full<Bytes> {
-    Full::new(Bytes::from(data.into()))
-}
-
-impl App {
-    async fn async_call(
-        &self,
-        req: Request<hyper::body::Incoming>,
-    ) -> Result<Response<Full<Bytes>>> {
-        let res = match req.uri().path() {
-            "/robots.txt" => Ok(Response::builder()
-                .body(fb("User-agent: *\nDisallow: /_thumbs/\nAllow: /\n"))
-                .unwrap()),
-            "/stats.json" => {
-                let global_stats = self.locked_stats.read().await;
-                let data = serde_json::to_string(&global_stats.deref()).unwrap();
-                Ok(Response::builder().body(fb(data)).unwrap())
-            }
-            _ => {
-                let parts = req.uri().path().split('/').collect::<Vec<&str>>();
-                if parts.len() != 4 {
-                    return Ok(Response::builder()
-                        .status(StatusCode::NOT_FOUND)
-                        .body(fb("Bad Path"))
-                        .unwrap());
-                }
-                let silo = parts[1].to_string();
-                let hash = parts[2].to_string();
-                let human = parts[3].to_string();
-
-                let global_stats = self.locked_stats.read().await;
-                let stats = match global_stats.get(&silo) {
-                    Some(s) => s,
-                    None => {
-                        return Ok(Response::builder()
-                            .status(StatusCode::NOT_FOUND)
-                            .body(fb("Not Found"))
-                            .unwrap());
-                    }
-                };
-
-                stats.inflight.fetch_add(1, Ordering::SeqCst);
-
-                let referer = if req.headers().contains_key(http::header::REFERER) {
-                    Some(
-                        req.headers()[http::header::REFERER]
-                            .to_str()
-                            .unwrap()
-                            .to_string(),
-                    )
-                } else {
-                    None
-                };
-                let ret = handle_request_inner(
-                    silo,
-                    hash,
-                    human,
-                    self.args.clone(),
-                    stats.clone(),
-                    self.locked_silos.clone(),
-                    self.name.clone(),
-                    referer,
-                )
-                .await;
-                stats.inflight.fetch_sub(1, Ordering::SeqCst);
-                ret
-            }
-        };
-
-        res
-    }
+    let silo = parts[1].to_string();
+    let hash = parts[2].to_string();
+    let human = parts[3].to_string();
+    let stats = {
+        let s = locked_stats.read().await;
+        match s.get(&silo) {
+            Some(s) => s.clone(),
+            None => return Ok(CacheResult::NotFound),
+        }
+    };
+    let owners = {
+        let silos = locked_silos.read().await;
+        match silos.get(&silo) {
+            Some(s) => s.lookup_list(&hash, 2),
+            None => return Ok(CacheResult::NotFound),
+        }
+    };
+    stats.inflight.fetch_add(1, Ordering::SeqCst);
+    let ret =
+        handle_request_inner(silo, hash, human, args, &stats, &owners, name, referer).await;
+    stats.inflight.fetch_sub(1, Ordering::SeqCst);
+    ret
 }
 
 async fn handle_request_inner(
     silo: String,
     hash: String,
     human: String,
-    args: GlobalArgs,
-    stats: Arc<crate::stats::Stats>,
-    locked_silos: GlobalSilos,
-    me: String,
-    referer: Option<String>,
-) -> Result<Response<Full<Bytes>>> {
+    args: &Args,
+    stats: &Arc<crate::stats::Stats>,
+    owners: &Vec<String>,
+    me: &String,
+    referer: Option<&str>,
+) -> Result<CacheResult> {
     stats.requests.fetch_add(1, Ordering::SeqCst);
     let ext = human.rsplit('.').next().unwrap();
     let content_type = match ext {
@@ -133,11 +80,7 @@ async fn handle_request_inner(
             } else if referer.contains("google") {
                 stats.google.fetch_add(1, Ordering::SeqCst);
                 let target = format!("https://holly.paheal.net/_thumbs/{}/thumb.jpg", hash);
-                return Ok(Response::builder()
-                    .status(StatusCode::TEMPORARY_REDIRECT)
-                    .header(http::header::LOCATION, &target)
-                    .body(fb(format!("Redirecting to thumb {}", target)))
-                    .unwrap());
+                return Ok(CacheResult::Redirect(target));
             } else {
                 stats.external.fetch_add(1, Ordering::SeqCst);
             }
@@ -145,19 +88,6 @@ async fn handle_request_inner(
             stats.norefer.fetch_add(1, Ordering::SeqCst);
         }
     }
-
-    let owners = {
-        let silos = locked_silos.read().await;
-        match silos.get(&silo) {
-            Some(s) => s.lookup_list(&hash, 2),
-            None => {
-                return Ok(Response::builder()
-                    .status(StatusCode::NOT_FOUND)
-                    .body(fb(format!("Silo {} not found", silo)))
-                    .unwrap());
-            }
-        }
-    };
 
     let path = Path::new(args.cache.as_str())
         .join(&silo)
@@ -176,7 +106,7 @@ async fn handle_request_inner(
     let default = "no-backup".to_string();
     let owner = owners.get(0).unwrap().clone();
     let backup = owners.get(1).unwrap_or(&default).clone();
-    if owner != me && backup != me {
+    if owner != me.deref() && backup != me.deref() {
         /*
         if path.exists() {
             if let Err(x) = fs::remove_file(&path).await {
@@ -190,23 +120,20 @@ async fn handle_request_inner(
         let target = format!("https://{}.paheal.net/{}/{}/image.jpg", owner, silo, hash);
 
         stats.redirect.fetch_add(1, Ordering::SeqCst);
-        return Ok(Response::builder()
-            .status(StatusCode::TEMPORARY_REDIRECT)
-            .header(http::header::LOCATION, &target)
-            .body(fb(format!("Redirecting to real owner {}", target)))
-            .unwrap());
+        return Ok(CacheResult::Redirect(target));
     }
 
     // ================================================================
     // If we own this image and it's on disk, fetch from disk
     // ================================================================
-    let (mtime, body) = if path.exists() {
+    return if path.exists() {
         stats.block_disk.fetch_add(1, Ordering::SeqCst);
         let maybe_mtime_body = fetch_file(&path).await;
         stats.block_disk.fetch_sub(1, Ordering::SeqCst);
 
         stats.hits.fetch_add(1, Ordering::SeqCst);
-        maybe_mtime_body?
+        let (mtime, body) = maybe_mtime_body?;
+        Ok(CacheResult::Hit(content_type, mtime, body))
     }
     // ================================================================
     // If we own this image and it's missing, fetch from upstream
@@ -219,10 +146,7 @@ async fn handle_request_inner(
 
         if res.status() != StatusCode::OK {
             stats.missing.fetch_add(1, Ordering::SeqCst);
-            return Ok(Response::builder()
-                .status(StatusCode::NOT_FOUND)
-                .body(fb(format!("{}/{} not found upstream", silo, hash)))
-                .unwrap());
+            return Ok(CacheResult::NotFound);
         }
 
         let mtime = httpdate::parse_http_date(
@@ -255,16 +179,8 @@ async fn handle_request_inner(
 
         stats.misses.fetch_add(1, Ordering::SeqCst);
 
-        (mtime, body)
+        Ok(CacheResult::Miss(content_type, mtime, body))
     };
-
-    Ok(Response::builder()
-        .status(StatusCode::OK)
-        .header(http::header::CONTENT_TYPE, content_type)
-        .header(http::header::LAST_MODIFIED, httpdate::fmt_http_date(mtime))
-        .header(http::header::CACHE_CONTROL, "public, max-age=31556926")
-        .body(fb(body))
-        .unwrap())
 }
 
 async fn fetch_url(url: hyper::Uri) -> Result<hyper::Response<hyper::body::Incoming>> {
